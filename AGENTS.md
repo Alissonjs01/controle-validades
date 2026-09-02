@@ -15,6 +15,7 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - Priorize validade, lotes, estoque restante, conversões e histórico.
 - Não adicione financeiro, CMV, fiscal, folha, vendas completas ou fornecedor complexo.
 - Não implemente IA, OCR, câmera, notificações reais ou parser completo antes da etapa correspondente.
+- O parser da Etapa 2 é determinístico; não adicione API de IA para interpretação de comandos.
 - Prefira decisões técnicas reversíveis sem pedir aprovação.
 
 ## Arquitetura
@@ -25,6 +26,11 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - Evite abstrações prematuras e pastas vazias.
 - Evite dependências novas quando a plataforma ou o código local resolvem bem.
 - Para alterações futuras de banco, use migrations.
+- Preserve a separação: texto -> parser -> intenção -> confirmação -> execução.
+- Parsing nunca deve alterar estoque ou banco.
+- Conversões de embalagem pertencem ao produto. Nunca assuma multiplicadores globais.
+- Validades são datas civis (`DATE`), não instantes UTC.
+- FEFO deve sugerir lote sem esconder ambiguidade da UI.
 
 ## Design system
 
@@ -55,3 +61,11 @@ npm run build
 
 Também confira `git status` e atualize a documentação quando arquitetura,
 configuração ou comandos mudarem.
+
+## Parser e vocabulário
+
+- Vocabulário operacional fica em `src/features/inventory/parser/vocabulary.ts`.
+- Normalização PT-BR fica em `src/features/inventory/parser/normalization.ts`.
+- Datas ficam em `src/features/inventory/domain/dates.ts`; anos abreviados usam regra central.
+- Produto, embalagem ou lote ambíguo deve retornar `AMBIGUOUS` ou `NEEDS_CONFIRMATION`.
+- Para novas expressões, aliases ou embalagens, atualize testes reais em `src/features/inventory`.

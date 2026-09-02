@@ -2,7 +2,7 @@
 
 PWA mobile-first para responder uma pergunta simples: **o que tenho, quanto tenho e o que está perto de vencer?**
 
-Esta etapa cria a fundação do aplicativo. O projeto ainda não implementa cadastro real de produtos, lotes, parser de linguagem natural, OCR, câmera, autenticação ou notificações.
+O projeto já possui fundação PWA e uma camada de domínio/parser determinístico. Ainda não implementa a interface final, OCR, câmera, autenticação, notificações reais ou integração com IA.
 
 ## Stack
 
@@ -21,7 +21,7 @@ Esta etapa cria a fundação do aplicativo. O projeto ainda não implementa cada
 src/
   app/             Rotas, layout, manifest PWA
   components/      Componentes base reutilizáveis
-  features/        Regras por domínio/feature
+  features/        Domínio, parser, fixtures e contratos por feature
   lib/             Integrações e utilitários
   styles/          Tokens e CSS global
   types/           Tipos compartilhados
@@ -29,9 +29,49 @@ public/
   icons/           Assets PWA temporários
   sw.js            Service worker mínimo
 e2e/               Base para testes E2E futuros
+supabase/
+  migrations/      Schema SQL versionado
 ```
 
-O domínio foi mantido pequeno de propósito. As próximas etapas devem introduzir `products`, `lots`, `inventory_movements`, `packaging_conversions`, `vocabulary` e `notification_preferences` sem adicionar módulos de ERP.
+O domínio foi mantido pequeno de propósito. Ele cobre `products`, `product_aliases`, `packaging_conversions`, `packaging_aliases`, `lots`, `inventory_movements` e `vocabulary_terms` sem adicionar módulos de ERP.
+
+## Domínio
+
+- Produtos possuem aliases próprios.
+- Conversões pertencem ao produto; `fardo = 6` para um produto não vale para outro.
+- Lotes são independentes e usam `expirationDate` como data civil.
+- FEFO é o padrão para sugerir saída quando o lote não foi informado.
+- Movimentações são separadas de parsing e preservam histórico com antes/depois.
+- Parsing nunca altera estoque; execução só deve ocorrer depois de confirmação.
+
+## Parser sem IA
+
+O parser está em `src/features/inventory/parser`. Ele usa normalização PT-BR, vocabulário, aliases e regras determinísticas.
+
+Status possíveis:
+
+- `READY`: interpretação completa para a UI pedir confirmação.
+- `NEEDS_CONFIRMATION`: falta confirmação ou há sugestão FEFO/data abreviada.
+- `AMBIGUOUS`: há mais de um candidato relevante.
+- `INVALID`: ação impossível ou dados inválidos.
+
+Exemplos cobertos por testes:
+
+```txt
+Chegou 20 fardos de Coca 2L vence 10/10/2027
+Vendeu 3 fardos da Coca 2L
+Saíram 18 unidades de Coca 2L
+Zerou a Coca 2L
+Vendeu tudo da Coca 2 litros
+```
+
+Para adicionar expressão operacional, edite `operationalVocabulary` em `src/features/inventory/parser/vocabulary.ts` e acrescente testes. Para novo alias de produto ou embalagem, persista o alias no banco futuramente e mantenha fixtures/testes locais quando necessário.
+
+## Datas
+
+Validade é tratada como data civil (`DATE` no banco), não como instante UTC. Isso evita que `10/10` vire `09/10` por conversão de timezone.
+
+Anos abreviados são expandidos por regra central em `expandTwoDigitExpirationYear`: `27` vira `2027`. A regra está testada e deve permanecer explícita.
 
 ## Instalação
 
@@ -74,7 +114,21 @@ Use apenas chave pública/publicável no frontend. Nunca exponha `service_role` 
 
 A integração está preparada em `src/lib/supabase`. Sem variáveis públicas, o app continua buildando e a função de cliente retorna `null`.
 
-As próximas etapas devem adicionar migrations e tipos gerados do Supabase antes de implementar acesso real às tabelas.
+O schema versionado está em `supabase/migrations/20260902190000_inventory_core.sql`.
+
+Ele cria:
+
+- `products`
+- `product_aliases`
+- `packaging_conversions`
+- `packaging_aliases`
+- `lots`
+- `inventory_movements`
+- `vocabulary_terms`
+
+Também inclui constraints de integridade, índices para aliases/FEFO/histórico e a função `inventory_apply_lot_movement` para atualização atômica futura de lote + movimento.
+
+Quando houver um projeto Supabase real, gere os tipos oficiais e compare com `src/types/database.ts`.
 
 ## PWA
 
@@ -100,9 +154,20 @@ A base visual está em `src/styles/globals.css`:
 
 Mantenha Iconoir como fonte principal de ícones. Não substitua silenciosamente por Lucide, Heroicons, Font Awesome ou similares.
 
+## Testes
+
+Os testes principais estão junto do domínio/parser:
+
+- `src/features/inventory/parser/parse-command.test.ts`
+- `src/features/inventory/domain/dates.test.ts`
+- `src/features/inventory/domain/fefo.test.ts`
+- `src/features/inventory/domain/movements.test.ts`
+
+Para adicionar novo tipo de embalagem, crie conversão no produto, aliases correspondentes e teste ao menos uma entrada e uma saída.
+
 ## Próximos passos
 
-1. Criar projeto Supabase, migrations e políticas.
-2. Modelar tabelas de produtos, lotes, movimentos e conversões.
-3. Gerar tipos do banco e substituir o placeholder em `src/types/database.ts`.
-4. Implementar fluxos reais de cadastro/movimentação mantendo o escopo focado em validades.
+1. Conectar projeto Supabase real e aplicar migrations.
+2. Gerar tipos oficiais do Supabase.
+3. Implementar a interface de confirmação da Etapa 3.
+4. Implementar repositórios/adapters reais mantendo parsing e execução separados.
