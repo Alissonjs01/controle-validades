@@ -1,0 +1,8 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Controle de Validades technical placeholder icon</title>
+  <desc id="desc">Temporary PWA icon with the letters CV. Replace before public launch.</desc>
+  <rect width="512" height="512" rx="112" fill="#F7F7F2"/>
+  <rect x="58" y="58" width="396" height="396" rx="86" fill="white" fill-opacity="0.74" stroke="#D8D9D0" stroke-width="4"/>
+  <path d="M178 180C155.4 180 138 197.8 138 220.9V291.1C138 314.2 155.4 332 178 332H223" stroke="#49695D" stroke-width="28" stroke-linecap="round"/>
+  <path d="M274 180L324 332L374 180" stroke="#49695D" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
