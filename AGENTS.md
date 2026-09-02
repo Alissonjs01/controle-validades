@@ -28,9 +28,12 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - Para alterações futuras de banco, use migrations.
 - Preserve a separação: texto -> parser -> intenção -> confirmação -> execução.
 - Parsing nunca deve alterar estoque ou banco.
+- A UI nunca deve alterar estoque sem confirmação explícita, mesmo quando o parser retorna `READY`.
+- A interface principal consome `src/features/inventory/app/local-inventory-store.ts` enquanto não houver Supabase real; preserve o contrato ao criar adapters reais.
 - Conversões de embalagem pertencem ao produto. Nunca assuma multiplicadores globais.
 - Validades são datas civis (`DATE`), não instantes UTC.
 - FEFO deve sugerir lote sem esconder ambiguidade da UI.
+- Regras de FEFO, conversão, quantidade e validade pertencem ao domínio/parser, não aos componentes React.
 
 ## Design system
 
@@ -40,6 +43,9 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - Preserve tokens de design antes de criar estilos pontuais.
 - Use Iconoir como biblioteca principal de ícones.
 - Não substitua silenciosamente Iconoir por Lucide, Heroicons, Font Awesome ou emojis permanentes.
+- A UI deve permanecer em português brasileiro, com datas em `DD/MM/YYYY`.
+- Mantenha composer, sheets e controles compatíveis com safe areas e toque em iPhone/iPad.
+- Evite aparência de dashboard/ERP; a primeira tela deve responder rapidamente validade, quantidade e lote prioritário.
 
 ## Segurança
 
@@ -56,6 +62,7 @@ Antes de concluir qualquer tarefa relevante, rode e corrija:
 npm run lint
 npm run typecheck
 npm run test
+npm run test:e2e
 npm run build
 ```
 
@@ -69,3 +76,22 @@ configuração ou comandos mudarem.
 - Datas ficam em `src/features/inventory/domain/dates.ts`; anos abreviados usam regra central.
 - Produto, embalagem ou lote ambíguo deve retornar `AMBIGUOUS` ou `NEEDS_CONFIRMATION`.
 - Para novas expressões, aliases ou embalagens, atualize testes reais em `src/features/inventory`.
+
+## Interface e fluxos
+
+- A tela principal fica em `src/features/inventory/app/InventoryApp.tsx`.
+- O adapter local persiste dados de desenvolvimento no `localStorage`; não dependa de Supabase para build/test.
+- Entrada, saída, zeramento e ajuste manual devem registrar `inventory_movements`.
+- Ambiguidades de produto/lote devem ser resolvidas visualmente antes da confirmação.
+- Testes de fluxo ficam em `src/features/inventory/app/InventoryApp.test.tsx` e `e2e/app.spec.ts`.
+- `npm run test:e2e` usa `scripts/run-e2e.mjs` para iniciar e encerrar o Next corretamente no Windows.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

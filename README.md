@@ -2,7 +2,7 @@
 
 PWA mobile-first para responder uma pergunta simples: **o que tenho, quanto tenho e o que está perto de vencer?**
 
-O projeto já possui fundação PWA e uma camada de domínio/parser determinístico. Ainda não implementa a interface final, OCR, câmera, autenticação, notificações reais ou integração com IA.
+O projeto já possui fundação PWA, domínio/parser determinístico e a interface principal de movimentações. Ainda não implementa OCR, câmera, autenticação complexa, notificações reais ou integração com IA.
 
 ## Stack
 
@@ -12,7 +12,7 @@ O projeto já possui fundação PWA e uma camada de domínio/parser determiníst
 - Iconoir como biblioteca principal de ícones
 - CSS moderno com tokens próprios de design
 - Vitest + Testing Library para testes unitários/de componentes
-- Playwright preparado para E2E futuro
+- Playwright para E2E mobile/desktop
 - GitHub Actions para CI
 
 ## Arquitetura
@@ -21,19 +21,45 @@ O projeto já possui fundação PWA e uma camada de domínio/parser determiníst
 src/
   app/             Rotas, layout, manifest PWA
   components/      Componentes base reutilizáveis
-  features/        Domínio, parser, fixtures e contratos por feature
+  features/        Domínio, parser, app inventory, fixtures e contratos por feature
   lib/             Integrações e utilitários
   styles/          Tokens e CSS global
   types/           Tipos compartilhados
 public/
   icons/           Assets PWA temporários
   sw.js            Service worker mínimo
-e2e/               Base para testes E2E futuros
+e2e/               Testes E2E dos fluxos principais
+scripts/           Automação local de validação, incluindo runner E2E
 supabase/
   migrations/      Schema SQL versionado
 ```
 
 O domínio foi mantido pequeno de propósito. Ele cobre `products`, `product_aliases`, `packaging_conversions`, `packaging_aliases`, `lots`, `inventory_movements` e `vocabulary_terms` sem adicionar módulos de ERP.
+
+## Interface
+
+A tela principal está em `src/features/inventory/app/InventoryApp.tsx`. Ela é mobile-first, em pt-BR, usa Iconoir e mantém o visual minimalista/glass definido na fundação.
+
+Fluxo obrigatório:
+
+```txt
+texto digitado -> parser -> confirmação -> execução -> histórico
+```
+
+Mesmo interpretações `READY` exigem confirmação explícita. Ambiguidades de produto/lote são apresentadas como escolhas antes de liberar o botão de confirmar.
+
+A UI atual cobre:
+
+- lista de lotes ativos ordenada por FEFO;
+- filtros `Todos`, `Até 7 dias`, `Até 30 dias` e `Vencidos`;
+- composer fixo com safe area para nova movimentação;
+- confirmação de entrada, saída e zeramento;
+- cadastro manual simples de lote;
+- edição de quantidade/produto/validade com movimento `ADJUSTMENT`;
+- histórico geral e histórico do lote;
+- toasts e mensagens amigáveis de erro.
+
+Sem Supabase real, a interface usa o adapter local em `src/features/inventory/app/local-inventory-store.ts`, persistindo dados de desenvolvimento no `localStorage`. A UI consome esse contrato para permitir troca futura por um repositório Supabase sem misturar parsing, execução e componentes.
 
 ## Domínio
 
@@ -93,11 +119,12 @@ O app abre por padrão em `http://localhost:3000`.
 npm run lint
 npm run typecheck
 npm run test
+npm run test:e2e
 npm run build
 npm run check
 ```
 
-Também existe `npm run test:e2e` para a base Playwright. Instale os navegadores do Playwright quando a etapa que exigir E2E real for implementada.
+`npm run test:e2e` inicia o Next localmente, roda Playwright em Mobile Safari e Desktop Chromium, e encerra o servidor ao final.
 
 ## Variáveis de ambiente
 
@@ -162,6 +189,8 @@ Os testes principais estão junto do domínio/parser:
 - `src/features/inventory/domain/dates.test.ts`
 - `src/features/inventory/domain/fefo.test.ts`
 - `src/features/inventory/domain/movements.test.ts`
+- `src/features/inventory/app/InventoryApp.test.tsx`
+- `e2e/app.spec.ts`
 
 Para adicionar novo tipo de embalagem, crie conversão no produto, aliases correspondentes e teste ao menos uma entrada e uma saída.
 
@@ -169,5 +198,5 @@ Para adicionar novo tipo de embalagem, crie conversão no produto, aliases corre
 
 1. Conectar projeto Supabase real e aplicar migrations.
 2. Gerar tipos oficiais do Supabase.
-3. Implementar a interface de confirmação da Etapa 3.
-4. Implementar repositórios/adapters reais mantendo parsing e execução separados.
+3. Implementar repositório Supabase real mantendo o contrato do adapter local.
+4. Preparar OCR/câmera, notificações e recursos da Etapa 4 sem adicionar IA ao parser determinístico.

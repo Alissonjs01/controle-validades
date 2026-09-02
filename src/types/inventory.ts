@@ -44,6 +44,7 @@ export type Lot = Readonly<{
   id: LotId;
   productId: ProductId;
   expirationDate: IsoDate;
+  lotCode?: string | null;
   originalQuantity: number;
   currentQuantity: number;
   status: LotStatus;

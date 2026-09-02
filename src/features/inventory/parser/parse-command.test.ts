@@ -197,7 +197,7 @@ describe("parseInventoryCommand ambiguity and invalid cases", () => {
 });
 
 function withSharedAlias(aliasValue: string): InventoryCatalog {
-  const products = devInventoryCatalog.products.map((product): Product => ({
+  const products = devInventoryCatalog.products.slice(0, 2).map((product): Product => ({
     ...product,
     aliases: [
       ...product.aliases,

@@ -1,0 +1,1181 @@
+"use client";
+
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  Archive,
+  Calendar,
+  Check,
+  ClockRotateRight,
+  EditPencil,
+  Filter,
+  NavArrowRight,
+  Plus,
+  Send,
+  WarningCircle,
+  Xmark
+} from "iconoir-react";
+
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Container } from "@/components/ui/Container";
+import { IconButton } from "@/components/ui/IconButton";
+import {
+  addEntryLot,
+  addManualLot,
+  applyInventoryMovement,
+  editLot,
+  loadInventoryState,
+  saveInventoryState,
+  type InventoryStoreState
+} from "@/features/inventory/app/local-inventory-store";
+import {
+  formatCivilDate,
+  formatDaysRemaining,
+  formatQuantity,
+  getDaysUntilExpiration,
+  getExpiryVisualState,
+  getProduct,
+  getProductName,
+  getTodayIsoDate,
+  movementLabel
+} from "@/features/inventory/domain/display";
+import { getOpenLotsByFefo } from "@/features/inventory/domain/fefo";
+import {
+  parseInventoryCommand,
+  type ParsedCommand
+} from "@/features/inventory/parser/parse-command";
+import type {
+  InventoryCatalog,
+  InventoryMovement,
+  IsoDate,
+  Lot,
+  LotId,
+  PackagingConversionId,
+  Product,
+  ProductId
+} from "@/types/inventory";
+
+type FilterKey = "all" | "expired" | "7" | "30";
+
+type PendingCommand = Readonly<{
+  text: string;
+  command: ParsedCommand;
+  selectedProductId: ProductId | null;
+  selectedLotId: LotId | null;
+}>;
+
+const filters: readonly { key: FilterKey; label: string }[] = [
+  { key: "all", label: "Todos" },
+  { key: "7", label: "Até 7 dias" },
+  { key: "30", label: "Até 30 dias" },
+  { key: "expired", label: "Vencidos" }
+];
+
+const subscribeToHydration = () => () => undefined;
+const getHydratedSnapshot = () => true;
+const getServerSnapshot = () => false;
+
+export function InventoryApp() {
+  const [state, setState] = useState<InventoryStoreState>(() =>
+    loadInventoryState()
+  );
+  const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
+  const [commandText, setCommandText] = useState("");
+  const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(
+    null
+  );
+  const [selectedLotId, setSelectedLotId] = useState<LotId | null>(null);
+  const [isManualOpen, setIsManualOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const isHydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getHydratedSnapshot,
+    getServerSnapshot
+  );
+  const [toast, setToast] = useState<string | null>(null);
+  const referenceDate = getTodayIsoDate();
+
+  useEffect(() => {
+    saveInventoryState(state);
+  }, [state]);
+
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setToast(null), 2600);
+
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const activeLots = useMemo(
+    () => getOpenLotsByFefo(state.lots),
+    [state.lots]
+  );
+  const visibleLots = useMemo(
+    () => filterLots(activeLots, activeFilter, referenceDate),
+    [activeFilter, activeLots, referenceDate]
+  );
+  const selectedLot = state.lots.find((lot) => lot.id === selectedLotId) ?? null;
+  const attentionCount = activeLots.filter(
+    (lot) => getDaysUntilExpiration(lot.expirationDate, referenceDate) <= 30
+  ).length;
+  const expiredCount = activeLots.filter(
+    (lot) => getDaysUntilExpiration(lot.expirationDate, referenceDate) < 0
+  ).length;
+
+  function submitCommand(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = commandText.trim();
+
+    if (!trimmed) {
+      setToast("Digite uma movimentação.");
+      return;
+    }
+
+    setPendingCommand({
+      text: trimmed,
+      command: parseInventoryCommand(trimmed, state, { referenceDate }),
+      selectedProductId: null,
+      selectedLotId: null
+    });
+  }
+
+  function confirmCommand(command: ParsedCommand, overrideLotId: LotId | null) {
+    const lot = overrideLotId
+      ? state.lots.find((item) => item.id === overrideLotId) ?? null
+      : command.lot;
+
+    try {
+      if (command.action === "ENTRY") {
+        if (!command.product || !command.expirationDate || !command.baseQuantity) {
+          setToast("Revise os dados antes de confirmar.");
+          return;
+        }
+
+        setState((current) =>
+          addEntryLot(current, {
+            productId: command.product!.id,
+            expirationDate: command.expirationDate!,
+            baseQuantity: command.baseQuantity!,
+            sourceText: command.originalText,
+            metadata: commandMetadata(command)
+          })
+        );
+        finishCommand("Entrada registrada");
+        return;
+      }
+
+      if (command.action === "EXIT") {
+        if (!command.product || !command.baseQuantity || !lot) {
+          setToast("Escolha o lote antes de confirmar.");
+          return;
+        }
+
+        setState((current) =>
+          applyInventoryMovement(current, {
+            type: "EXIT",
+            productId: command.product!.id,
+            lotId: lot.id,
+            baseQuantity: command.baseQuantity!,
+            sourceText: command.originalText,
+            metadata: commandMetadata(command)
+          })
+        );
+        finishCommand(`${command.baseQuantity} unidades baixadas`);
+        return;
+      }
+
+      if (command.action === "ZERO") {
+        if (!command.product || !lot) {
+          setToast("Escolha o lote antes de zerar.");
+          return;
+        }
+
+        setState((current) =>
+          applyInventoryMovement(current, {
+            type: "ZERO",
+            productId: command.product!.id,
+            lotId: lot.id,
+            baseQuantity: 0,
+            sourceText: command.originalText,
+            metadata: commandMetadata(command)
+          })
+        );
+        finishCommand("Lote zerado");
+      }
+    } catch (error) {
+      setToast(toFriendlyError(error));
+    }
+  }
+
+  function finishCommand(message: string) {
+    setPendingCommand(null);
+    setCommandText("");
+    setToast(message);
+  }
+
+  return (
+    <main className="inventory-shell">
+      <Container className="inventory-home">
+        <header className="inventory-topbar">
+          <div>
+            <span className="eyebrow">Validades</span>
+            <h1>Validades</h1>
+            <p>
+              {expiredCount > 0
+                ? `${expiredCount} vencido${expiredCount > 1 ? "s" : ""} • ${attentionCount} em atenção`
+                : `${attentionCount} lote${attentionCount === 1 ? "" : "s"} exige${attentionCount === 1 ? "" : "m"} atenção`}
+            </p>
+          </div>
+          <div className="topbar-actions">
+            <IconButton
+              aria-label="Abrir histórico"
+              onClick={() => setIsHistoryOpen(true)}
+            >
+              <ClockRotateRight aria-hidden="true" />
+            </IconButton>
+            <IconButton
+              aria-label="Novo lote manual"
+              onClick={() => setIsManualOpen(true)}
+            >
+              <Plus aria-hidden="true" />
+            </IconButton>
+          </div>
+        </header>
+
+        <FilterTabs
+          activeFilter={activeFilter}
+          lots={activeLots}
+          onChange={setActiveFilter}
+          referenceDate={referenceDate}
+        />
+
+        <section aria-label="Lotes ativos" className="inventory-list">
+          {visibleLots.length > 0 ? (
+            visibleLots.map((lot, index) => (
+              <LotCard
+                isFefo={index === 0 && activeFilter === "all"}
+                key={lot.id}
+                lot={lot}
+                onOpen={() => setSelectedLotId(lot.id)}
+                product={getProduct(state.products, lot.productId)}
+                referenceDate={referenceDate}
+              />
+            ))
+          ) : (
+            <EmptyState
+              description="Troque o filtro ou cadastre uma nova entrada."
+              icon={<Archive aria-hidden="true" />}
+              title="Nenhum lote neste filtro"
+            />
+          )}
+        </section>
+      </Container>
+
+      {isHydrated ? (
+        <MovementComposer
+          commandText={commandText}
+          onChange={setCommandText}
+          onSubmit={submitCommand}
+        />
+      ) : (
+        <div aria-hidden="true" className="movement-composer movement-composer--loading">
+          <span className="movement-composer__input-skeleton" />
+          <span className="movement-composer__send movement-composer__send--loading" />
+        </div>
+      )}
+
+      {pendingCommand ? (
+        <MovementConfirmation
+          catalog={state}
+          onCancel={() => setPendingCommand(null)}
+          onConfirm={confirmCommand}
+          onSelectLot={(lotId) =>
+            setPendingCommand((current) =>
+              current ? { ...current, selectedLotId: lotId } : current
+            )
+          }
+          onSelectProduct={(productId) =>
+            setPendingCommand((current) =>
+              current
+                ? { ...current, selectedProductId: productId, selectedLotId: null }
+                : current
+            )
+          }
+          pending={pendingCommand}
+          referenceDate={referenceDate}
+        />
+      ) : null}
+
+      {selectedLot ? (
+        <LotDetailsSheet
+          lot={selectedLot}
+          movements={state.movements}
+          onClose={() => setSelectedLotId(null)}
+          onSave={(input) => {
+            try {
+              setState((current) => editLot(current, input));
+              setToast("Lote atualizado");
+              setSelectedLotId(null);
+            } catch (error) {
+              setToast(toFriendlyError(error));
+            }
+          }}
+          onZero={(lot) => {
+            try {
+              setState((current) =>
+                applyInventoryMovement(current, {
+                  type: "ZERO",
+                  productId: lot.productId,
+                  lotId: lot.id,
+                  baseQuantity: 0,
+                  sourceText: "Zeramento manual",
+                  metadata: { source: "lot-details" }
+                })
+              );
+              setToast("Lote zerado");
+              setSelectedLotId(null);
+            } catch (error) {
+              setToast(toFriendlyError(error));
+            }
+          }}
+          products={state.products}
+          referenceDate={referenceDate}
+        />
+      ) : null}
+
+      {isManualOpen ? (
+        <ManualLotSheet
+          onClose={() => setIsManualOpen(false)}
+          onSave={(input) => {
+            try {
+              setState((current) => addManualLot(current, input));
+              setIsManualOpen(false);
+              setToast("Entrada registrada");
+            } catch (error) {
+              setToast(toFriendlyError(error));
+            }
+          }}
+          state={state}
+        />
+      ) : null}
+
+      {isHistoryOpen ? (
+        <HistorySheet
+          movements={state.movements}
+          onClose={() => setIsHistoryOpen(false)}
+          products={state.products}
+        />
+      ) : null}
+
+      {toast ? (
+        <div className="toast" role="status">
+          {toast}
+        </div>
+      ) : null}
+    </main>
+  );
+}
+
+function FilterTabs({
+  activeFilter,
+  lots,
+  onChange,
+  referenceDate
+}: {
+  activeFilter: FilterKey;
+  lots: readonly Lot[];
+  onChange: (filter: FilterKey) => void;
+  referenceDate: IsoDate;
+}) {
+  return (
+    <div aria-label="Filtros de validade" className="filter-tabs">
+      <Filter aria-hidden="true" />
+      {filters.map((filter) => (
+        <button
+          aria-pressed={activeFilter === filter.key}
+          className="filter-tab"
+          key={filter.key}
+          onClick={() => onChange(filter.key)}
+          type="button"
+        >
+          <span>{filter.label}</span>
+          <strong>{filterCount(lots, filter.key, referenceDate)}</strong>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function LotCard({
+  isFefo,
+  lot,
+  onOpen,
+  product,
+  referenceDate
+}: {
+  isFefo: boolean;
+  lot: Lot;
+  onOpen: () => void;
+  product: Product | null;
+  referenceDate: IsoDate;
+}) {
+  const days = getDaysUntilExpiration(lot.expirationDate, referenceDate);
+  const state = getExpiryVisualState(lot.expirationDate, referenceDate);
+
+  return (
+    <button
+      className={`lot-card lot-card--${state}`}
+      onClick={onOpen}
+      type="button"
+    >
+      <span aria-hidden="true" className="lot-card__rail" />
+      <span className="lot-card__main">
+        <span className="lot-card__title">{product?.name ?? "Produto"}</span>
+        <span className="lot-card__quantity">
+          {formatQuantity(lot.currentQuantity, product?.baseUnitLabel ?? "unidade")}
+        </span>
+      </span>
+      <span className="lot-card__meta">
+        <Badge variant={state}>{expiryLabel(state)}</Badge>
+        {isFefo ? <span className="fefo-pill">Usar primeiro</span> : null}
+        <span className="lot-card__date">
+          <Calendar aria-hidden="true" />
+          {formatCivilDate(lot.expirationDate)}
+        </span>
+        <span>{formatDaysRemaining(days)}</span>
+      </span>
+      <NavArrowRight aria-hidden="true" />
+    </button>
+  );
+}
+
+function MovementComposer({
+  commandText,
+  onChange,
+  onSubmit
+}: {
+  commandText: string;
+  onChange: (value: string) => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <form
+      aria-label="Nova movimentação"
+      className="movement-composer"
+      onSubmit={onSubmit}
+    >
+      <input
+        aria-label="Nova movimentação"
+        autoComplete="off"
+        className="movement-composer__input"
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Nova movimentação..."
+        value={commandText}
+      />
+      <IconButton
+        aria-label="Interpretar movimentação"
+        className="movement-composer__send"
+        type="submit"
+      >
+        <Send aria-hidden="true" />
+      </IconButton>
+    </form>
+  );
+}
+
+function MovementConfirmation({
+  catalog,
+  onCancel,
+  onConfirm,
+  onSelectLot,
+  onSelectProduct,
+  pending,
+  referenceDate
+}: {
+  catalog: InventoryCatalog;
+  onCancel: () => void;
+  onConfirm: (command: ParsedCommand, lotId: LotId | null) => void;
+  onSelectLot: (lotId: LotId) => void;
+  onSelectProduct: (productId: ProductId) => void;
+  pending: PendingCommand;
+  referenceDate: IsoDate;
+}) {
+  const command = useMemo(
+    () => resolvePendingCommand(pending, catalog, referenceDate),
+    [catalog, pending, referenceDate]
+  );
+  const selectedLot = pending.selectedLotId
+    ? catalog.lots.find((lot) => lot.id === pending.selectedLotId) ?? null
+    : command.lot;
+  const canConfirm =
+    command.action !== null &&
+    command.errors.length === 0 &&
+    command.product !== null &&
+    (command.action === "ZERO" ||
+      (command.baseQuantity !== null && command.baseQuantity > 0)) &&
+    (command.action === "ENTRY"
+      ? command.expirationDate !== null
+      : selectedLot !== null);
+
+  return (
+    <div className="sheet-backdrop" role="presentation">
+      <section
+        aria-labelledby="movement-confirmation-title"
+        className="bottom-sheet confirmation-sheet"
+        role="dialog"
+      >
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Confirmar</span>
+            <h2 id="movement-confirmation-title">{actionTitle(command.action)}</h2>
+          </div>
+          <IconButton aria-label="Cancelar confirmação" onClick={onCancel}>
+            <Xmark aria-hidden="true" />
+          </IconButton>
+        </div>
+
+        <p className="command-quote">“{pending.text}”</p>
+
+        {command.errors.length > 0 ? (
+          <MessageBlock messages={command.errors.map(humanizeIssue)} tone="danger" />
+        ) : null}
+
+        {command.productCandidates.length > 0 ? (
+          <ChoiceGroup
+            label="Qual produto?"
+            onSelect={onSelectProduct}
+            options={command.productCandidates.map((product) => ({
+              id: product.id,
+              label: product.name
+            }))}
+            selectedId={pending.selectedProductId}
+          />
+        ) : null}
+
+        {command.lotCandidates.length > 1 ? (
+          <ChoiceGroup
+            label="Qual lote?"
+            onSelect={onSelectLot}
+            options={command.lotCandidates.map((lot) => ({
+              id: lot.id,
+              label: `${formatCivilDate(lot.expirationDate)} • ${formatQuantity(
+                lot.currentQuantity,
+                getProduct(catalog.products, lot.productId)?.baseUnitLabel ??
+                  "unidade"
+              )}`
+            }))}
+            selectedId={pending.selectedLotId ?? command.lot?.id ?? null}
+          />
+        ) : null}
+
+        <dl className="confirmation-summary">
+          <div>
+            <dt>Produto</dt>
+            <dd>{command.product?.name ?? "Escolha o produto"}</dd>
+          </div>
+          {command.action !== "ZERO" ? (
+            <div>
+              <dt>Quantidade</dt>
+              <dd>
+                {command.enteredQuantity && command.conversion
+                  ? `${command.enteredQuantity} ${command.packaging} × ${command.conversion.multiplier}`
+                  : "Informe quantidade e embalagem"}
+              </dd>
+            </div>
+          ) : null}
+          {command.baseQuantity ? (
+            <div className="confirmation-total">
+              <dt>Total</dt>
+              <dd>
+                {command.action === "ENTRY" ? "+" : "-"}
+                {formatQuantity(
+                  command.baseQuantity,
+                  command.product?.baseUnitLabel ?? "unidade"
+                )}
+              </dd>
+            </div>
+          ) : null}
+          {command.action === "ENTRY" ? (
+            <div>
+              <dt>Validade</dt>
+              <dd>
+                {command.expirationDate
+                  ? formatCivilDate(command.expirationDate)
+                  : "Informe a validade"}
+              </dd>
+            </div>
+          ) : null}
+          {command.action === "EXIT" || command.action === "ZERO" ? (
+            <div>
+              <dt>Lote</dt>
+              <dd>
+                {selectedLot
+                  ? `${formatCivilDate(selectedLot.expirationDate)} • ${formatDaysRemaining(
+                      getDaysUntilExpiration(selectedLot.expirationDate, referenceDate)
+                    )}`
+                  : "Escolha um lote"}
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+
+        {command.warnings.length > 0 || command.missingFields.length > 0 ? (
+          <MessageBlock
+            messages={[
+              ...command.warnings.map(humanizeIssue),
+              ...command.missingFields.map(humanizeIssue)
+            ]}
+            tone="info"
+          />
+        ) : null}
+
+        <div className="sheet-actions">
+          <Button onClick={onCancel} variant="secondary">
+            Cancelar
+          </Button>
+          <Button
+            disabled={!canConfirm}
+            onClick={() => onConfirm(command, selectedLot?.id ?? null)}
+          >
+            <Check aria-hidden="true" />
+            Confirmar
+          </Button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ManualLotSheet({
+  onClose,
+  onSave,
+  state
+}: {
+  onClose: () => void;
+  onSave: (input: {
+    productId: ProductId;
+    conversionId: PackagingConversionId;
+    enteredQuantity: number;
+    expirationDate: IsoDate;
+    sourceText: string | null;
+  }) => void;
+  state: InventoryStoreState;
+}) {
+  const [productId, setProductId] = useState(state.products[0]?.id ?? "");
+  const conversions = state.packagingConversions.filter(
+    (conversion) => conversion.productId === productId
+  );
+  const [conversionId, setConversionId] = useState(conversions[0]?.id ?? "");
+  const effectiveConversionId = conversions.some(
+    (conversion) => conversion.id === conversionId
+  )
+    ? conversionId
+    : conversions[0]?.id ?? "";
+  const [quantity, setQuantity] = useState("1");
+  const [expirationDate, setExpirationDate] = useState("");
+
+  return (
+    <div className="sheet-backdrop" role="presentation">
+      <section aria-labelledby="manual-lot-title" className="bottom-sheet" role="dialog">
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Fallback</span>
+            <h2 id="manual-lot-title">Novo lote</h2>
+          </div>
+          <IconButton aria-label="Fechar novo lote" onClick={onClose}>
+            <Xmark aria-hidden="true" />
+          </IconButton>
+        </div>
+        <form
+          className="sheet-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSave({
+              productId,
+              conversionId: effectiveConversionId,
+              enteredQuantity: Number(quantity),
+              expirationDate: expirationDate as IsoDate,
+              sourceText: "Cadastro manual"
+            });
+          }}
+        >
+          <SelectField
+            label="Produto"
+            onChange={(nextProductId) => {
+              setProductId(nextProductId);
+              setConversionId(
+                state.packagingConversions.find(
+                  (conversion) => conversion.productId === nextProductId
+                )?.id ?? ""
+              );
+            }}
+            value={productId}
+          >
+            {state.products.map((product) => (
+              <option key={product.id} value={product.id}>
+                {product.name}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField
+            label="Embalagem"
+            onChange={setConversionId}
+            value={effectiveConversionId}
+          >
+            {conversions.map((conversion) => (
+              <option key={conversion.id} value={conversion.id}>
+                {conversion.packagingType} × {conversion.multiplier}
+              </option>
+            ))}
+          </SelectField>
+          <TextField
+            label="Quantidade"
+            min="0.001"
+            onChange={setQuantity}
+            step="0.001"
+            type="number"
+            value={quantity}
+          />
+          <TextField
+            label="Validade"
+            onChange={setExpirationDate}
+            type="date"
+            value={expirationDate}
+          />
+          <div className="sheet-actions">
+            <Button onClick={onClose} variant="secondary">
+              Cancelar
+            </Button>
+            <Button
+              disabled={
+                !productId ||
+                !effectiveConversionId ||
+                !expirationDate ||
+                Number(quantity) <= 0
+              }
+              type="submit"
+            >
+              <Plus aria-hidden="true" />
+              Salvar
+            </Button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function LotDetailsSheet({
+  lot,
+  movements,
+  onClose,
+  onSave,
+  onZero,
+  products,
+  referenceDate
+}: {
+  lot: Lot;
+  movements: readonly InventoryMovement[];
+  onClose: () => void;
+  onSave: (input: {
+    lotId: LotId;
+    productId: ProductId;
+    currentQuantity: number;
+    expirationDate: IsoDate;
+  }) => void;
+  onZero: (lot: Lot) => void;
+  products: readonly Product[];
+  referenceDate: IsoDate;
+}) {
+  const [productId, setProductId] = useState(lot.productId);
+  const [quantity, setQuantity] = useState(lot.currentQuantity.toString());
+  const [expirationDate, setExpirationDate] = useState<string>(lot.expirationDate);
+  const [isZeroConfirming, setIsZeroConfirming] = useState(false);
+  const product = getProduct(products, lot.productId);
+  const lotMovements = movements
+    .filter((movement) => movement.lotId === lot.id)
+    .slice(0, 4);
+
+  return (
+    <div className="sheet-backdrop" role="presentation">
+      <section aria-labelledby="lot-details-title" className="bottom-sheet" role="dialog">
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Editar lote</span>
+            <h2 id="lot-details-title">{product?.name ?? "Produto"}</h2>
+          </div>
+          <IconButton aria-label="Fechar lote" onClick={onClose}>
+            <Xmark aria-hidden="true" />
+          </IconButton>
+        </div>
+        <p className="sheet-muted">
+          {formatQuantity(lot.currentQuantity, product?.baseUnitLabel ?? "unidade")} •{" "}
+          {formatDaysRemaining(
+            getDaysUntilExpiration(lot.expirationDate, referenceDate)
+          )}
+        </p>
+        <form
+          className="sheet-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSave({
+              lotId: lot.id,
+              productId,
+              currentQuantity: Number(quantity),
+              expirationDate: expirationDate as IsoDate
+            });
+          }}
+        >
+          <SelectField label="Produto" onChange={setProductId} value={productId}>
+            {products.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </SelectField>
+          <TextField
+            label="Quantidade atual"
+            min="0"
+            onChange={setQuantity}
+            step="0.001"
+            type="number"
+            value={quantity}
+          />
+          <TextField
+            label="Validade"
+            onChange={setExpirationDate}
+            type="date"
+            value={expirationDate}
+          />
+          <div className="sheet-actions">
+            <Button type="submit" variant="secondary">
+              <EditPencil aria-hidden="true" />
+              Salvar edição
+            </Button>
+            <Button onClick={() => setIsZeroConfirming(true)} variant="ghost">
+              Zerar lote
+            </Button>
+          </div>
+        </form>
+        {isZeroConfirming ? (
+          <div className="inline-confirm" role="alert">
+            <WarningCircle aria-hidden="true" />
+            <span>
+              Zerar as{" "}
+              {formatQuantity(lot.currentQuantity, product?.baseUnitLabel ?? "unidade")}{" "}
+              restantes?
+            </span>
+            <Button onClick={() => onZero(lot)}>Confirmar</Button>
+          </div>
+        ) : null}
+        <MovementHistory movements={lotMovements} products={products} title="Histórico do lote" />
+      </section>
+    </div>
+  );
+}
+
+function HistorySheet({
+  movements,
+  onClose,
+  products
+}: {
+  movements: readonly InventoryMovement[];
+  onClose: () => void;
+  products: readonly Product[];
+}) {
+  return (
+    <div className="sheet-backdrop" role="presentation">
+      <section aria-labelledby="history-title" className="bottom-sheet" role="dialog">
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Auditoria</span>
+            <h2 id="history-title">Histórico</h2>
+          </div>
+          <IconButton aria-label="Fechar histórico" onClick={onClose}>
+            <Xmark aria-hidden="true" />
+          </IconButton>
+        </div>
+        <MovementHistory movements={movements} products={products} title="Movimentações" />
+      </section>
+    </div>
+  );
+}
+
+function MovementHistory({
+  movements,
+  products,
+  title
+}: {
+  movements: readonly InventoryMovement[];
+  products: readonly Product[];
+  title: string;
+}) {
+  return (
+    <section aria-label={title} className="history-block">
+      <h3>{title}</h3>
+      {movements.length > 0 ? (
+        <ol className="history-list">
+          {movements.map((movement) => (
+            <li className="history-item" key={movement.id}>
+              <span
+                className={`history-delta ${
+                  movement.quantityDelta >= 0 ? "positive" : "negative"
+                }`}
+              >
+                {movement.quantityDelta > 0 ? "+" : ""}
+                {movement.quantityDelta}
+              </span>
+              <span>
+                <strong>{movementLabel(movement.type)}</strong>
+                <small>{getProductName(products, movement.productId)}</small>
+                {movement.sourceText ? <em>“{movement.sourceText}”</em> : null}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="sheet-muted">Sem movimentações ainda.</p>
+      )}
+    </section>
+  );
+}
+
+function ChoiceGroup({
+  label,
+  onSelect,
+  options,
+  selectedId
+}: {
+  label: string;
+  onSelect: (id: string) => void;
+  options: readonly { id: string; label: string }[];
+  selectedId: string | null;
+}) {
+  return (
+    <fieldset className="choice-group">
+      <legend>{label}</legend>
+      {options.map((option) => (
+        <button
+          aria-pressed={selectedId === option.id}
+          key={option.id}
+          onClick={() => onSelect(option.id)}
+          type="button"
+        >
+          {option.label}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
+function MessageBlock({
+  messages,
+  tone
+}: {
+  messages: readonly string[];
+  tone: "danger" | "info";
+}) {
+  return (
+    <div className={`message-block message-block--${tone}`}>
+      <WarningCircle aria-hidden="true" />
+      <div>
+        {messages.map((message) => (
+          <p key={message}>{message}</p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({
+  description,
+  icon,
+  title
+}: {
+  description: string;
+  icon: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <div className="empty-state">
+      {icon}
+      <h2>{title}</h2>
+      <p>{description}</p>
+    </div>
+  );
+}
+
+function SelectField({
+  children,
+  label,
+  onChange,
+  value
+}: {
+  children: React.ReactNode;
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <label className="form-field">
+      <span>{label}</span>
+      <select onChange={(event) => onChange(event.target.value)} value={value}>
+        {children}
+      </select>
+    </label>
+  );
+}
+
+type TextFieldProps = Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  "onChange" | "value"
+> & {
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+};
+
+function TextField({
+  label,
+  onChange,
+  value,
+  ...props
+}: TextFieldProps) {
+  return (
+    <label className="form-field">
+      <span>{label}</span>
+      <input
+        {...props}
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      />
+    </label>
+  );
+}
+
+function filterLots(
+  lots: readonly Lot[],
+  filter: FilterKey,
+  referenceDate: IsoDate
+) {
+  return lots.filter((lot) => {
+    const days = getDaysUntilExpiration(lot.expirationDate, referenceDate);
+
+    if (filter === "expired") {
+      return days < 0;
+    }
+
+    if (filter === "7") {
+      return days >= 0 && days <= 7;
+    }
+
+    if (filter === "30") {
+      return days >= 0 && days <= 30;
+    }
+
+    return true;
+  });
+}
+
+function filterCount(
+  lots: readonly Lot[],
+  filter: FilterKey,
+  referenceDate: IsoDate
+) {
+  return filterLots(lots, filter, referenceDate).length;
+}
+
+function resolvePendingCommand(
+  pending: PendingCommand,
+  catalog: InventoryCatalog,
+  referenceDate: IsoDate
+) {
+  if (!pending.selectedProductId) {
+    return pending.command;
+  }
+
+  const product = catalog.products.find(
+    (item) => item.id === pending.selectedProductId
+  );
+
+  if (!product) {
+    return pending.command;
+  }
+
+  return parseInventoryCommand(
+    pending.text,
+    {
+      ...catalog,
+      products: [product]
+    },
+    { referenceDate }
+  );
+}
+
+function commandMetadata(command: ParsedCommand) {
+  return {
+    enteredQuantity: command.enteredQuantity,
+    packaging: command.packaging,
+    multiplier: command.conversion?.multiplier ?? null,
+    parserStatus: command.status
+  };
+}
+
+function actionTitle(action: ParsedCommand["action"]) {
+  switch (action) {
+    case "ENTRY":
+      return "Nova entrada";
+    case "EXIT":
+      return "Saída";
+    case "ZERO":
+      return "Zerar lote";
+    case "ADJUSTMENT":
+      return "Ajuste";
+    default:
+      return "Revisar movimentação";
+  }
+}
+
+function expiryLabel(state: "expired" | "urgent" | "attention" | "normal") {
+  switch (state) {
+    case "expired":
+      return "Vencido";
+    case "urgent":
+      return "Urgente";
+    case "attention":
+      return "Atenção";
+    case "normal":
+      return "Normal";
+  }
+}
+
+function humanizeIssue(issue: string) {
+  const labels: Record<string, string> = {
+    action: "Não reconheci se é entrada, saída ou zeramento.",
+    product: "Escolha ou informe o produto.",
+    quantity: "Informe a quantidade.",
+    packagingConversion: "Informe uma embalagem com conversão cadastrada.",
+    expirationDate: "Informe a validade da entrada."
+  };
+
+  return labels[issue] ?? issue;
+}
+
+function toFriendlyError(error: unknown) {
+  if (error instanceof Error && error.message.includes("negative inventory")) {
+    return "A quantidade disponível é menor que a saída solicitada.";
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Não foi possível registrar a movimentação.";
+}

@@ -33,7 +33,8 @@ export const devProducts: readonly Product[] = [
         "product-coca-cola-2l",
         "coca-cola 2 litros"
       ),
-      alias("alias-coca-grande", "product-coca-cola-2l", "coca grande")
+      alias("alias-coca-grande", "product-coca-cola-2l", "coca grande"),
+      alias("alias-coca", "product-coca-cola-2l", "coca")
     ],
     createdAt: now,
     updatedAt: now
@@ -45,7 +46,20 @@ export const devProducts: readonly Product[] = [
     isActive: true,
     aliases: [
       alias("alias-coca-lata", "product-coca-cola-lata", "coca lata"),
-      alias("alias-coca-cola-lata", "product-coca-cola-lata", "coca cola lata")
+      alias("alias-coca-cola-lata", "product-coca-cola-lata", "coca cola lata"),
+      alias("alias-coca-lata-shared", "product-coca-cola-lata", "coca")
+    ],
+    createdAt: now,
+    updatedAt: now
+  },
+  {
+    id: "product-agua-mineral-500ml",
+    name: "Água Mineral 500ml",
+    baseUnitLabel: "unidade",
+    isActive: true,
+    aliases: [
+      alias("alias-agua-500ml", "product-agua-mineral-500ml", "agua 500ml"),
+      alias("alias-agua-mineral", "product-agua-mineral-500ml", "agua mineral")
     ],
     createdAt: now,
     updatedAt: now
@@ -88,6 +102,24 @@ export const devPackagingConversions: readonly PackagingConversion[] = [
     aliases: ["fardo", "fardos", "fd"],
     createdAt: now,
     updatedAt: now
+  },
+  {
+    id: "conversion-agua-unidade",
+    productId: "product-agua-mineral-500ml",
+    packagingType: "unidade",
+    multiplier: 1,
+    aliases: ["unidade", "unidades", "un", "unds"],
+    createdAt: now,
+    updatedAt: now
+  },
+  {
+    id: "conversion-agua-pacote",
+    productId: "product-agua-mineral-500ml",
+    packagingType: "pacote",
+    multiplier: 12,
+    aliases: ["pacote", "pacotes", "pct"],
+    createdAt: now,
+    updatedAt: now
   }
 ];
 
@@ -118,6 +150,16 @@ export const devLots: readonly Lot[] = [
     expirationDate: "2026-10-10",
     originalQuantity: 120,
     currentQuantity: 120,
+    status: "OPEN",
+    createdAt: now,
+    updatedAt: now
+  },
+  {
+    id: "lot-agua-2026-09-20",
+    productId: "product-agua-mineral-500ml",
+    expirationDate: "2026-09-20",
+    originalQuantity: 96,
+    currentQuantity: 96,
     status: "OPEN",
     createdAt: now,
     updatedAt: now
