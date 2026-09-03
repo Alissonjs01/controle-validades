@@ -16,6 +16,7 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - Não adicione financeiro, CMV, fiscal, folha, vendas completas ou fornecedor complexo.
 - Não implemente IA, OCR, câmera, notificações reais ou parser completo antes da etapa correspondente.
 - O parser da Etapa 2 é determinístico; não adicione API de IA para interpretação de comandos.
+- OCR da Etapa 4 deve permanecer focado em validade; não tentar reconhecer marca, preço, código de barras ou fornecedor sem requisito explícito.
 - Prefira decisões técnicas reversíveis sem pedir aprovação.
 
 ## Arquitetura
@@ -34,6 +35,9 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - Validades são datas civis (`DATE`), não instantes UTC.
 - FEFO deve sugerir lote sem esconder ambiguidade da UI.
 - Regras de FEFO, conversão, quantidade e validade pertencem ao domínio/parser, não aos componentes React.
+- OCR deve reutilizar `src/features/inventory/domain/dates.ts` e `src/features/inventory/ocr/expiration-date-extraction.ts`.
+- Alertas devem usar `src/features/inventory/notifications/alerts.ts` e registrar marcos emitidos para evitar spam.
+- Supabase real deve usar migrations e RPCs transacionais; não faça atualização ingênua de estoque no frontend.
 
 ## Design system
 
@@ -46,6 +50,7 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - A UI deve permanecer em português brasileiro, com datas em `DD/MM/YYYY`.
 - Mantenha composer, sheets e controles compatíveis com safe areas e toque em iPhone/iPad.
 - Evite aparência de dashboard/ERP; a primeira tela deve responder rapidamente validade, quantidade e lote prioritário.
+- A captura de validade deve manter o visual do app; não usar input/botão padrão aparente quando houver alternativa acessível.
 
 ## Segurança
 
@@ -53,6 +58,8 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - Nunca coloque Service Role Key ou tokens administrativos no frontend.
 - Mantenha `.env*` sensível fora do Git.
 - `.env.example` deve conter apenas nomes e valores fictícios.
+- Fotos usadas no OCR não devem ser persistidas nem enviadas para APIs externas sem consentimento e documentação explícitos.
+- Não habilite banco de produção aberto; preserve RLS/policies e documente pendências de autenticação.
 
 ## Qualidade obrigatória
 
@@ -76,6 +83,7 @@ configuração ou comandos mudarem.
 - Datas ficam em `src/features/inventory/domain/dates.ts`; anos abreviados usam regra central.
 - Produto, embalagem ou lote ambíguo deve retornar `AMBIGUOUS` ou `NEEDS_CONFIRMATION`.
 - Para novas expressões, aliases ou embalagens, atualize testes reais em `src/features/inventory`.
+- Para novas variações de OCR de validade, atualize testes em `src/features/inventory/ocr`.
 
 ## Interface e fluxos
 
@@ -85,6 +93,8 @@ configuração ou comandos mudarem.
 - Ambiguidades de produto/lote devem ser resolvidas visualmente antes da confirmação.
 - Testes de fluxo ficam em `src/features/inventory/app/InventoryApp.test.tsx` e `e2e/app.spec.ts`.
 - `npm run test:e2e` usa `scripts/run-e2e.mjs` para iniciar e encerrar o Next corretamente no Windows.
+- O fluxo OCR fica em `OcrSheet`: imagem -> OCR -> data(s) candidata(s) -> confirmação/correção -> novo lote pré-preenchido.
+- O fluxo de avisos fica em `AlertsSheet`: alertas internos sempre ativos, Notification API apenas após ação explícita.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

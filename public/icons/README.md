@@ -1,6 +1,13 @@
 # PWA icons
 
-`pwa-icon.svg` is a technical placeholder for this foundation stage.
+Os ícones usam uma composição abstrata de validade/controle: anel temporal,
+confirmação e superfície glass escura. Eles não usam marcas, caixas genéricas ou
+ícones de bibliotecas.
 
-Before public release, replace it with final brand assets and add PNG variants for
-Apple touch icons and maskable Android icons.
+Arquivos esperados:
+
+- `pwa-icon.svg`: fonte vetorial.
+- `maskable-icon.svg`: versão com margem segura para Android.
+- `pwa-icon-192.png`, `pwa-icon-512.png`: manifest PWA.
+- `maskable-icon-512.png`: manifest maskable.
+- `apple-touch-icon.png`: iPhone/iPad.

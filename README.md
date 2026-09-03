@@ -2,7 +2,7 @@
 
 PWA mobile-first para responder uma pergunta simples: **o que tenho, quanto tenho e o que está perto de vencer?**
 
-O projeto já possui fundação PWA, domínio/parser determinístico e a interface principal de movimentações. Ainda não implementa OCR, câmera, autenticação complexa, notificações reais ou integração com IA.
+O projeto já possui fundação PWA, domínio/parser determinístico, interface principal de movimentações, OCR local de validade, alertas internos e adapter Supabase preparado. Ainda não implementa IA nem autenticação complexa.
 
 ## Stack
 
@@ -10,6 +10,7 @@ O projeto já possui fundação PWA, domínio/parser determinístico e a interfa
 - React + TypeScript strict
 - Supabase JS SDK preparado, sem depender de credenciais reais
 - Iconoir como biblioteca principal de ícones
+- Tesseract.js carregado sob demanda para OCR no navegador
 - CSS moderno com tokens próprios de design
 - Vitest + Testing Library para testes unitários/de componentes
 - Playwright para E2E mobile/desktop
@@ -57,9 +58,36 @@ A UI atual cobre:
 - cadastro manual simples de lote;
 - edição de quantidade/produto/validade com movimento `ADJUSTMENT`;
 - histórico geral e histórico do lote;
+- leitura de validade por câmera/arquivo com confirmação e correção;
+- alertas internos e preferências de aviso;
 - toasts e mensagens amigáveis de erro.
 
 Sem Supabase real, a interface usa o adapter local em `src/features/inventory/app/local-inventory-store.ts`, persistindo dados de desenvolvimento no `localStorage`. A UI consome esse contrato para permitir troca futura por um repositório Supabase sem misturar parsing, execução e componentes.
+
+## Câmera e OCR
+
+O fluxo `Ler validade` usa `input type="file" accept="image/*" capture="environment"` para abrir câmera no mobile e seletor de imagem no desktop.
+
+O OCR fica em `src/features/inventory/ocr`:
+
+- `browser-ocr.ts` carrega `tesseract.js` somente quando o usuário escolhe uma imagem;
+- a imagem é pré-processada no navegador com canvas simples e descartada após leitura;
+- nenhuma foto é enviada para APIs pagas ou serviços de IA;
+- `expiration-date-extraction.ts` reutiliza a regra de datas civis do domínio.
+
+Quando há múltiplas datas, a UI mostra opções. A validade detectada sempre exige confirmação e pode ser corrigida manualmente antes de preencher o cadastro de lote.
+
+## Alertas
+
+Alertas ficam em `src/features/inventory/notifications`.
+
+- Preferências padrão: 30, 15, 7 dias e no vencimento.
+- O app registra marcos já emitidos para evitar repetição.
+- Lotes zerados/encerrados não geram alertas.
+- O alerta interno funciona sempre ao abrir o app.
+- Notificações do navegador só são solicitadas após o usuário tocar em `Ativar avisos`.
+
+Limitação real: PWAs não têm push/background confiável em todos os navegadores sem backend de push. Por isso, a versão atual usa Notification API quando disponível e mantém alertas internos como degradação segura.
 
 ## Domínio
 
@@ -124,7 +152,7 @@ npm run build
 npm run check
 ```
 
-`npm run test:e2e` inicia o Next localmente, roda Playwright em Mobile Safari e Desktop Chromium, e encerra o servidor ao final.
+`npm run test:e2e` inicia o Next localmente, roda Playwright em Mobile Safari, Mobile Chrome e Desktop Chromium, e encerra o servidor ao final.
 
 ## Variáveis de ambiente
 
@@ -141,7 +169,7 @@ Use apenas chave pública/publicável no frontend. Nunca exponha `service_role` 
 
 A integração está preparada em `src/lib/supabase`. Sem variáveis públicas, o app continua buildando e a função de cliente retorna `null`.
 
-O schema versionado está em `supabase/migrations/20260902190000_inventory_core.sql`.
+Os schemas versionados ficam em `supabase/migrations`.
 
 Ele cria:
 
@@ -155,6 +183,16 @@ Ele cria:
 
 Também inclui constraints de integridade, índices para aliases/FEFO/histórico e a função `inventory_apply_lot_movement` para atualização atômica futura de lote + movimento.
 
+A migration final adiciona:
+
+- `notification_preferences`
+- `notification_deliveries`
+- RPC `inventory_create_entry_lot`
+- RPC `inventory_adjust_lot`
+- RLS habilitado com políticas para usuários autenticados
+
+Sem credenciais reais, o app continua operando com adapter local. Com Supabase real, aplique migrations, gere tipos oficiais e conecte a UI ao repositório em `src/features/inventory/repositories/supabase-inventory-repository.ts`.
+
 Quando houver um projeto Supabase real, gere os tipos oficiais e compare com `src/types/database.ts`.
 
 ## PWA
@@ -165,10 +203,9 @@ A fundação inclui:
 - viewport com `viewport-fit=cover`
 - suporte a safe areas no CSS
 - `display: standalone`
-- service worker mínimo em `public/sw.js`
-- ícone SVG técnico em `public/icons/pwa-icon.svg`
-
-Antes do lançamento público, substitua o ícone técnico por assets finais e adicione PNGs para Apple touch icon e Android maskable icon.
+- service worker em `public/sw.js`
+- ícones SVG/PNG para manifest, maskable Android e Apple touch icon
+- metadata Apple Web App e status bar translúcida
 
 ## Design system
 
@@ -189,6 +226,8 @@ Os testes principais estão junto do domínio/parser:
 - `src/features/inventory/domain/dates.test.ts`
 - `src/features/inventory/domain/fefo.test.ts`
 - `src/features/inventory/domain/movements.test.ts`
+- `src/features/inventory/notifications/alerts.test.ts`
+- `src/features/inventory/ocr/expiration-date-extraction.test.ts`
 - `src/features/inventory/app/InventoryApp.test.tsx`
 - `e2e/app.spec.ts`
 
@@ -196,7 +235,7 @@ Para adicionar novo tipo de embalagem, crie conversão no produto, aliases corre
 
 ## Próximos passos
 
-1. Conectar projeto Supabase real e aplicar migrations.
+1. Conectar projeto Supabase real e aplicar migrations quando houver credenciais/autenticação.
 2. Gerar tipos oficiais do Supabase.
-3. Implementar repositório Supabase real mantendo o contrato do adapter local.
-4. Preparar OCR/câmera, notificações e recursos da Etapa 4 sem adicionar IA ao parser determinístico.
+3. Decidir modelo de autenticação antes de usar RLS em produção multiusuário.
+4. Evoluir push/background se houver backend de notificações.

@@ -18,8 +18,15 @@ export const metadata: Metadata = {
   description: appDescription,
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
     title: appName
+  },
+  icons: {
+    icon: [
+      { url: "/icons/pwa-icon.svg", type: "image/svg+xml" },
+      { url: "/icons/pwa-icon-192.png", sizes: "192x192", type: "image/png" }
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }]
   },
   formatDetection: {
     telephone: false
@@ -32,8 +39,11 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
-  themeColor: "#f7f7f2",
-  colorScheme: "light"
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#111513" },
+    { media: "(prefers-color-scheme: light)", color: "#f7f7f2" }
+  ],
+  colorScheme: "dark light"
 };
 
 type RootLayoutProps = Readonly<{

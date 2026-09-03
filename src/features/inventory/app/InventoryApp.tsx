@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   Archive,
+  BellNotification,
   Calendar,
+  Camera,
   Check,
   ClockRotateRight,
+  CloudDesync,
   EditPencil,
   Filter,
   NavArrowRight,
@@ -25,9 +28,12 @@ import {
   applyInventoryMovement,
   editLot,
   loadInventoryState,
+  recordAlertDeliveries,
   saveInventoryState,
+  updateAlertPreferences,
   type InventoryStoreState
 } from "@/features/inventory/app/local-inventory-store";
+import { parseBrazilianCivilDate } from "@/features/inventory/domain/dates";
 import {
   formatCivilDate,
   formatDaysRemaining,
@@ -40,6 +46,18 @@ import {
   movementLabel
 } from "@/features/inventory/domain/display";
 import { getOpenLotsByFefo } from "@/features/inventory/domain/fefo";
+import {
+  createAlertDeliveries,
+  DEFAULT_ALERT_MILESTONES,
+  getAlertMilestoneLabel,
+  getAlertSummary,
+  getDueExpiryAlerts,
+  getInternalAttentionLots,
+  type DueExpiryAlert
+} from "@/features/inventory/notifications/alerts";
+import { recognizeExpirationDatesFromImage } from "@/features/inventory/ocr/browser-ocr";
+import type { OcrExpirationExtraction } from "@/features/inventory/ocr/expiration-date-extraction";
+import { normalizePortugueseText } from "@/features/inventory/parser/normalization";
 import {
   parseInventoryCommand,
   type ParsedCommand
@@ -64,6 +82,16 @@ type PendingCommand = Readonly<{
   selectedLotId: LotId | null;
 }>;
 
+type OcrReviewState = Readonly<{
+  phase: "idle" | "reading" | "review" | "error";
+  progress: number;
+  statusText: string;
+  result: OcrExpirationExtraction | null;
+  selectedDate: IsoDate | null;
+  manualDate: string;
+  errorMessage: string | null;
+}>;
+
 const filters: readonly { key: FilterKey; label: string }[] = [
   { key: "all", label: "Todos" },
   { key: "7", label: "Até 7 dias" },
@@ -74,6 +102,22 @@ const filters: readonly { key: FilterKey; label: string }[] = [
 const subscribeToHydration = () => () => undefined;
 const getHydratedSnapshot = () => true;
 const getServerSnapshot = () => false;
+const subscribeToOnlineStatus = (callback: () => void) => {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+
+  window.addEventListener("online", callback);
+  window.addEventListener("offline", callback);
+
+  return () => {
+    window.removeEventListener("online", callback);
+    window.removeEventListener("offline", callback);
+  };
+};
+const getOnlineSnapshot = () =>
+  typeof navigator === "undefined" ? true : navigator.onLine;
+const getServerOnlineSnapshot = () => true;
 
 export function InventoryApp() {
   const [state, setState] = useState<InventoryStoreState>(() =>
@@ -86,11 +130,20 @@ export function InventoryApp() {
   );
   const [selectedLotId, setSelectedLotId] = useState<LotId | null>(null);
   const [isManualOpen, setIsManualOpen] = useState(false);
+  const [manualInitialExpirationDate, setManualInitialExpirationDate] =
+    useState<IsoDate | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isOcrOpen, setIsOcrOpen] = useState(false);
+  const [isAlertsOpen, setIsAlertsOpen] = useState(false);
   const isHydrated = useSyncExternalStore(
     subscribeToHydration,
     getHydratedSnapshot,
     getServerSnapshot
+  );
+  const isOnline = useSyncExternalStore(
+    subscribeToOnlineStatus,
+    getOnlineSnapshot,
+    getServerOnlineSnapshot
   );
   const [toast, setToast] = useState<string | null>(null);
   const referenceDate = getTodayIsoDate();
@@ -118,12 +171,52 @@ export function InventoryApp() {
     [activeFilter, activeLots, referenceDate]
   );
   const selectedLot = state.lots.find((lot) => lot.id === selectedLotId) ?? null;
+  const internalAlertLots = useMemo(
+    () => getInternalAttentionLots(activeLots, referenceDate),
+    [activeLots, referenceDate]
+  );
+  const dueBrowserAlerts = useMemo(
+    () =>
+      getDueExpiryAlerts({
+        lots: activeLots,
+        products: state.products,
+        preferences: state.alertPreferences,
+        deliveries: state.alertDeliveries,
+        referenceDate
+      }),
+    [
+      activeLots,
+      referenceDate,
+      state.alertDeliveries,
+      state.alertPreferences,
+      state.products
+    ]
+  );
   const attentionCount = activeLots.filter(
     (lot) => getDaysUntilExpiration(lot.expirationDate, referenceDate) <= 30
   ).length;
   const expiredCount = activeLots.filter(
     (lot) => getDaysUntilExpiration(lot.expirationDate, referenceDate) < 0
   ).length;
+
+  useEffect(() => {
+    if (dueBrowserAlerts.length === 0) {
+      return;
+    }
+
+    void deliverDueBrowserAlerts(dueBrowserAlerts).then((deliveredAlerts) => {
+      if (deliveredAlerts.length === 0) {
+        return;
+      }
+
+      setState((current) =>
+        recordAlertDeliveries(
+          current,
+          createAlertDeliveries(deliveredAlerts, new Date().toISOString())
+        )
+      );
+    });
+  }, [dueBrowserAlerts]);
 
   function submitCommand(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -231,6 +324,18 @@ export function InventoryApp() {
           </div>
           <div className="topbar-actions">
             <IconButton
+              aria-label="Ler validade"
+              onClick={() => setIsOcrOpen(true)}
+            >
+              <Camera aria-hidden="true" />
+            </IconButton>
+            <IconButton
+              aria-label="Preferências de avisos"
+              onClick={() => setIsAlertsOpen(true)}
+            >
+              <BellNotification aria-hidden="true" />
+            </IconButton>
+            <IconButton
               aria-label="Abrir histórico"
               onClick={() => setIsHistoryOpen(true)}
             >
@@ -238,7 +343,10 @@ export function InventoryApp() {
             </IconButton>
             <IconButton
               aria-label="Novo lote manual"
-              onClick={() => setIsManualOpen(true)}
+              onClick={() => {
+                setManualInitialExpirationDate(null);
+                setIsManualOpen(true);
+              }}
             >
               <Plus aria-hidden="true" />
             </IconButton>
@@ -251,6 +359,25 @@ export function InventoryApp() {
           onChange={setActiveFilter}
           referenceDate={referenceDate}
         />
+
+        {!isOnline ? (
+          <div className="offline-strip" role="status">
+            <CloudDesync aria-hidden="true" />
+            <span>Sem conexão. O modo local continua funcionando.</span>
+          </div>
+        ) : null}
+
+        {internalAlertLots.length > 0 ? (
+          <button
+            className="attention-strip"
+            onClick={() => setIsAlertsOpen(true)}
+            type="button"
+          >
+            <BellNotification aria-hidden="true" />
+            <span>{getAlertSummary(activeLots, referenceDate)}</span>
+            <NavArrowRight aria-hidden="true" />
+          </button>
+        ) : null}
 
         <section aria-label="Lotes ativos" className="inventory-list">
           {visibleLots.length > 0 ? (
@@ -348,17 +475,50 @@ export function InventoryApp() {
 
       {isManualOpen ? (
         <ManualLotSheet
-          onClose={() => setIsManualOpen(false)}
+          initialExpirationDate={manualInitialExpirationDate}
+          onClose={() => {
+            setIsManualOpen(false);
+            setManualInitialExpirationDate(null);
+          }}
           onSave={(input) => {
             try {
               setState((current) => addManualLot(current, input));
               setIsManualOpen(false);
+              setManualInitialExpirationDate(null);
               setToast("Entrada registrada");
             } catch (error) {
               setToast(toFriendlyError(error));
             }
           }}
           state={state}
+        />
+      ) : null}
+
+      {isOcrOpen ? (
+        <OcrSheet
+          onClose={() => setIsOcrOpen(false)}
+          onConfirmDate={(date) => {
+            setIsOcrOpen(false);
+            setManualInitialExpirationDate(date);
+            setIsManualOpen(true);
+            setToast("Validade preenchida");
+          }}
+          referenceDate={referenceDate}
+        />
+      ) : null}
+
+      {isAlertsOpen ? (
+        <AlertsSheet
+          activeLots={activeLots}
+          alerts={dueBrowserAlerts}
+          onClose={() => setIsAlertsOpen(false)}
+          onSavePreferences={(preferences) => {
+            setState((current) => updateAlertPreferences(current, preferences));
+            setToast(preferences.enabled ? "Avisos atualizados" : "Avisos pausados");
+          }}
+          preferences={state.alertPreferences}
+          products={state.products}
+          referenceDate={referenceDate}
         />
       ) : null}
 
@@ -650,11 +810,349 @@ function MovementConfirmation({
   );
 }
 
+function OcrSheet({
+  onClose,
+  onConfirmDate,
+  referenceDate
+}: {
+  onClose: () => void;
+  onConfirmDate: (date: IsoDate) => void;
+  referenceDate: IsoDate;
+}) {
+  const [ocrState, setOcrState] = useState<OcrReviewState>({
+    phase: "idle",
+    progress: 0,
+    statusText: "",
+    result: null,
+    selectedDate: null,
+    manualDate: "",
+    errorMessage: null
+  });
+  const selectedCandidate =
+    ocrState.selectedDate && ocrState.result
+      ? ocrState.result.candidates.find(
+          (candidate) => candidate.isoDate === ocrState.selectedDate
+        ) ?? null
+      : null;
+  const parsedManualDate = parseManualOcrDate(ocrState.manualDate, referenceDate);
+  const confirmDate = parsedManualDate ?? ocrState.selectedDate;
+  const warnings = selectedCandidate?.warnings.length
+    ? selectedCandidate.warnings
+    : confirmDate
+      ? getOcrDateWarnings(confirmDate, referenceDate)
+      : [];
+
+  async function readImage(file: File | null) {
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setOcrState({
+        phase: "error",
+        progress: 0,
+        statusText: "",
+        result: null,
+        selectedDate: null,
+        manualDate: "",
+        errorMessage: "Escolha uma imagem da validade."
+      });
+      return;
+    }
+
+    setOcrState({
+      phase: "reading",
+      progress: 0,
+      statusText: "Preparando imagem",
+      result: null,
+      selectedDate: null,
+      manualDate: "",
+      errorMessage: null
+    });
+
+    try {
+      const result = await recognizeExpirationDatesFromImage(file, {
+        referenceDate,
+        onProgress: (progress, status) =>
+          setOcrState((current) => ({
+            ...current,
+            phase: "reading",
+            progress,
+            statusText: status
+          }))
+      });
+      const selectedDate = result.suggestedCandidate?.isoDate ?? null;
+
+      setOcrState({
+        phase: result.candidates.length > 0 ? "review" : "error",
+        progress: 1,
+        statusText: "Leitura concluída",
+        result,
+        selectedDate,
+        manualDate: selectedDate ? formatCivilDate(selectedDate) : "",
+        errorMessage:
+          result.candidates.length > 0
+            ? null
+            : "Não encontrei uma validade clara nessa imagem."
+      });
+    } catch {
+      setOcrState({
+        phase: "error",
+        progress: 0,
+        statusText: "",
+        result: null,
+        selectedDate: null,
+        manualDate: "",
+        errorMessage: "Não foi possível ler a imagem. Você pode digitar a validade."
+      });
+    }
+  }
+
+  return (
+    <div className="sheet-backdrop" role="presentation">
+      <section aria-labelledby="ocr-title" className="bottom-sheet" role="dialog">
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Câmera</span>
+            <h2 id="ocr-title">Ler validade</h2>
+          </div>
+          <IconButton aria-label="Fechar leitura de validade" onClick={onClose}>
+            <Xmark aria-hidden="true" />
+          </IconButton>
+        </div>
+
+        <p className="sheet-muted">
+          Fotografe só a área onde aparece VAL, VENC ou validade. A imagem é
+          processada no navegador e descartada depois da leitura.
+        </p>
+
+        <label className="capture-control">
+          <Camera aria-hidden="true" />
+          <span>Tirar foto ou escolher imagem</span>
+          <input
+            accept="image/*"
+            aria-label="Foto da validade"
+            capture="environment"
+            onChange={(event) => void readImage(event.target.files?.[0] ?? null)}
+            type="file"
+          />
+        </label>
+
+        {ocrState.phase === "reading" ? (
+          <div className="ocr-progress" role="status">
+            <span>Processando OCR</span>
+            <progress max={1} value={ocrState.progress} />
+            <small>{ocrState.statusText || "Lendo imagem"}</small>
+          </div>
+        ) : null}
+
+        {ocrState.result?.candidates.length ? (
+          <ChoiceGroup
+            label={
+              ocrState.result.candidates.length > 1
+                ? "Qual é a validade?"
+                : "Validade encontrada"
+            }
+            onSelect={(date) =>
+              setOcrState((current) => ({
+                ...current,
+                selectedDate: date as IsoDate,
+                manualDate: formatCivilDate(date as IsoDate)
+              }))
+            }
+            options={ocrState.result.candidates.map((candidate) => ({
+              id: candidate.isoDate,
+              label: candidate.displayDate
+            }))}
+            selectedId={ocrState.selectedDate}
+          />
+        ) : null}
+
+        {ocrState.errorMessage ? (
+          <MessageBlock messages={[ocrState.errorMessage]} tone="danger" />
+        ) : null}
+
+        {ocrState.result?.invalidCandidates.length ? (
+          <MessageBlock
+            messages={ocrState.result.invalidCandidates.map(
+              (candidate) => `${candidate.source} não é uma data válida.`
+            )}
+            tone="info"
+          />
+        ) : null}
+
+        <TextField
+          inputMode="numeric"
+          label="Corrigir validade"
+          onChange={(value) =>
+            setOcrState((current) => ({
+              ...current,
+              manualDate: value
+            }))
+          }
+          placeholder="DD/MM/AAAA"
+          value={ocrState.manualDate}
+        />
+
+        {warnings.length > 0 ? <MessageBlock messages={warnings} tone="info" /> : null}
+
+        <div className="sheet-actions">
+          <Button onClick={onClose} variant="secondary">
+            Cancelar
+          </Button>
+          <Button disabled={!confirmDate} onClick={() => confirmDate && onConfirmDate(confirmDate)}>
+            <Check aria-hidden="true" />
+            Usar validade
+          </Button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AlertsSheet({
+  activeLots,
+  alerts,
+  onClose,
+  onSavePreferences,
+  preferences,
+  products,
+  referenceDate
+}: {
+  activeLots: readonly Lot[];
+  alerts: readonly DueExpiryAlert[];
+  onClose: () => void;
+  onSavePreferences: (preferences: InventoryStoreState["alertPreferences"]) => void;
+  preferences: InventoryStoreState["alertPreferences"];
+  products: readonly Product[];
+  referenceDate: IsoDate;
+}) {
+  const [selectedMilestones, setSelectedMilestones] = useState(
+    new Set(preferences.milestones)
+  );
+  const internalLots = getInternalAttentionLots(activeLots, referenceDate);
+  const notificationSupport = getNotificationSupportLabel();
+
+  async function activateAlerts() {
+    const permission = await requestNotificationPermission();
+
+    onSavePreferences({
+      enabled: permission === "granted",
+      milestones: [...selectedMilestones].sort((left, right) => right - left)
+    });
+  }
+
+  return (
+    <div className="sheet-backdrop" role="presentation">
+      <section aria-labelledby="alerts-title" className="bottom-sheet" role="dialog">
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Avisos</span>
+            <h2 id="alerts-title">Alertas de validade</h2>
+          </div>
+          <IconButton aria-label="Fechar avisos" onClick={onClose}>
+            <Xmark aria-hidden="true" />
+          </IconButton>
+        </div>
+
+        <p className="sheet-muted">
+          O app destaca lotes críticos ao abrir. Avisos do navegador só são pedidos
+          depois que você ativar.
+        </p>
+
+        <div className="alert-preferences">
+          {DEFAULT_ALERT_MILESTONES.map((milestone) => (
+            <label key={milestone}>
+              <input
+                checked={selectedMilestones.has(milestone)}
+                onChange={(event) => {
+                  const next = new Set(selectedMilestones);
+
+                  if (event.target.checked) {
+                    next.add(milestone);
+                  } else {
+                    next.delete(milestone);
+                  }
+
+                  setSelectedMilestones(next);
+                }}
+                type="checkbox"
+              />
+              <span>{getAlertMilestoneLabel(milestone)}</span>
+            </label>
+          ))}
+        </div>
+
+        <MessageBlock
+          messages={[
+            notificationSupport,
+            "Sem push em segundo plano confiável em todos os PWAs, os alertas internos continuam sendo a fonte principal."
+          ]}
+          tone="info"
+        />
+
+        {alerts.length > 0 ? (
+          <section className="due-alerts" aria-label="Avisos pendentes">
+            <h3>Avisos pendentes</h3>
+            {alerts.map((alert) => (
+              <p key={alert.id}>
+                <strong>{alert.title}</strong>
+                <span>{alert.body}</span>
+              </p>
+            ))}
+          </section>
+        ) : null}
+
+        <section className="due-alerts" aria-label="Lotes em atenção">
+          <h3>Lotes em atenção</h3>
+          {internalLots.length > 0 ? (
+            internalLots.map((lot) => (
+              <p key={lot.id}>
+                <strong>{getProductName(products, lot.productId)}</strong>
+                <span>
+                  {formatCivilDate(lot.expirationDate)} •{" "}
+                  {formatDaysRemaining(
+                    getDaysUntilExpiration(lot.expirationDate, referenceDate)
+                  )}
+                </span>
+              </p>
+            ))
+          ) : (
+            <p className="sheet-muted">Nenhum lote exige atenção agora.</p>
+          )}
+        </section>
+
+        <div className="sheet-actions">
+          <Button
+            onClick={() =>
+              onSavePreferences({
+                enabled: false,
+                milestones: [...selectedMilestones].sort((left, right) => right - left)
+              })
+            }
+            variant="secondary"
+          >
+            Pausar avisos
+          </Button>
+          <Button disabled={selectedMilestones.size === 0} onClick={() => void activateAlerts()}>
+            <BellNotification aria-hidden="true" />
+            Ativar avisos
+          </Button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ManualLotSheet({
+  initialExpirationDate,
   onClose,
   onSave,
   state
 }: {
+  initialExpirationDate: IsoDate | null;
   onClose: () => void;
   onSave: (input: {
     productId: ProductId;
@@ -676,7 +1174,7 @@ function ManualLotSheet({
     ? conversionId
     : conversions[0]?.id ?? "";
   const [quantity, setQuantity] = useState("1");
-  const [expirationDate, setExpirationDate] = useState("");
+  const [expirationDate, setExpirationDate] = useState(initialExpirationDate ?? "");
 
   return (
     <div className="sheet-backdrop" role="presentation">
@@ -1166,6 +1664,90 @@ function humanizeIssue(issue: string) {
   };
 
   return labels[issue] ?? issue;
+}
+
+function parseManualOcrDate(value: string, referenceDate: IsoDate) {
+  const parsed = parseBrazilianCivilDate(
+    normalizePortugueseText(value),
+    referenceDate
+  );
+
+  return parsed.kind === "complete" ? parsed.value : null;
+}
+
+function getOcrDateWarnings(date: IsoDate, referenceDate: IsoDate) {
+  const days = getDaysUntilExpiration(date, referenceDate);
+
+  if (days < 0) {
+    return ["Essa data já passou. Confira antes de confirmar."];
+  }
+
+  if (days > 6 * 366) {
+    return ["Essa validade parece muito distante. Confira a leitura."];
+  }
+
+  return [];
+}
+
+async function requestNotificationPermission() {
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return "unsupported";
+  }
+
+  if (Notification.permission === "granted") {
+    return "granted";
+  }
+
+  if (Notification.permission === "denied") {
+    return "denied";
+  }
+
+  return Notification.requestPermission();
+}
+
+function getNotificationSupportLabel() {
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return "Este navegador não oferece avisos locais.";
+  }
+
+  if (Notification.permission === "granted") {
+    return "Avisos do navegador estão ativos neste dispositivo.";
+  }
+
+  if (Notification.permission === "denied") {
+    return "O navegador bloqueou avisos. Os alertas internos continuam funcionando.";
+  }
+
+  return "Toque em Ativar avisos para permitir notificações deste app.";
+}
+
+async function deliverDueBrowserAlerts(alerts: readonly DueExpiryAlert[]) {
+  if (
+    typeof window === "undefined" ||
+    !("Notification" in window) ||
+    Notification.permission !== "granted"
+  ) {
+    return [];
+  }
+
+  const registration =
+    "serviceWorker" in navigator ? await navigator.serviceWorker.ready : null;
+
+  for (const alert of alerts) {
+    const options: NotificationOptions = {
+      body: alert.body,
+      icon: "/icons/pwa-icon-192.png",
+      tag: alert.id
+    };
+
+    if (registration) {
+      await registration.showNotification(alert.title, options);
+    } else {
+      new Notification(alert.title, options);
+    }
+  }
+
+  return alerts;
 }
 
 function toFriendlyError(error: unknown) {

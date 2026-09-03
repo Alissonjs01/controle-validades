@@ -160,6 +160,38 @@ export type Database = {
           updated_at?: string;
         }
       >;
+      notification_preferences: TableDefinition<
+        {
+          id: string;
+          enabled: boolean;
+          milestones: number[];
+          created_at: string;
+          updated_at: string;
+        },
+        {
+          id?: string;
+          enabled?: boolean;
+          milestones?: number[];
+          created_at?: string;
+          updated_at?: string;
+        }
+      >;
+      notification_deliveries: TableDefinition<
+        {
+          id: string;
+          lot_id: string;
+          milestone: number;
+          delivered_at: string;
+          created_at: string;
+        },
+        {
+          id?: string;
+          lot_id: string;
+          milestone: number;
+          delivered_at?: string;
+          created_at?: string;
+        }
+      >;
     };
     Views: Record<string, never>;
     Functions: {
@@ -170,6 +202,28 @@ export type Database = {
           p_quantity_delta: number;
           p_source_text?: string | null;
           p_parsed_command?: Json;
+          p_metadata?: Json;
+        };
+        Returns: string;
+      };
+      inventory_create_entry_lot: {
+        Args: {
+          p_product_id: string;
+          p_expiration_date: string;
+          p_base_quantity: number;
+          p_source_text?: string | null;
+          p_parsed_command?: Json;
+          p_metadata?: Json;
+        };
+        Returns: string;
+      };
+      inventory_adjust_lot: {
+        Args: {
+          p_lot_id: string;
+          p_product_id: string;
+          p_expiration_date: string;
+          p_current_quantity: number;
+          p_source_text?: string | null;
           p_metadata?: Json;
         };
         Returns: string;

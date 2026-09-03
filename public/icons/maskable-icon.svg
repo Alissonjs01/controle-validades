@@ -1,0 +1,10 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Controle de Validades maskable</title>
+  <desc id="desc">Ícone maskable com margem segura para PWA.</desc>
+  <rect width="512" height="512" fill="#111513"/>
+  <rect x="80" y="80" width="352" height="352" rx="92" fill="#202622" stroke="#F5F2E5" stroke-opacity="0.13" stroke-width="4"/>
+  <circle cx="256" cy="248" r="108" stroke="#91B7A1" stroke-width="24" stroke-linecap="round" stroke-dasharray="440 230"/>
+  <path d="M205 258L241 294L316 214" stroke="#F4F3EB" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M256 134V168" stroke="#D3A94B" stroke-width="18" stroke-linecap="round"/>
+  <path d="M256 328V362" stroke="#D3A94B" stroke-width="18" stroke-linecap="round"/>
+</svg>

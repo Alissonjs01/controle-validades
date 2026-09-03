@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InventoryApp } from "@/features/inventory/app/InventoryApp";
@@ -129,6 +135,46 @@ describe("InventoryApp", () => {
     expect(within(history).getAllByText("Entrada")[0]).toBeVisible();
     expect(within(history).getAllByText(hasText("Estoque inicial"))[0]).toBeVisible();
     expect(history).not.toHaveTextContent("parsed_command");
+  });
+
+  it("reads an OCR validity date and pre-fills manual lot creation", async () => {
+    vi.useRealTimers();
+    window.__CONTROLE_VALIDADES_OCR_TEXT__ =
+      "FAB 02/08/2026 VAL 18/11/2026";
+    render(<InventoryApp />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ler validade" }));
+    fireEvent.change(screen.getByLabelText("Foto da validade"), {
+      target: {
+        files: [new File(["fixture"], "validade.png", { type: "image/png" })]
+      }
+    });
+
+    expect(await screen.findByText("Qual é a validade?")).toBeVisible();
+    expect(screen.getByRole("button", { name: "18/11/2026" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Usar validade" }));
+
+    expect(screen.getByRole("heading", { name: "Novo lote" })).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByLabelText("Validade")).toHaveValue("2026-11-18")
+    );
+
+    delete window.__CONTROLE_VALIDADES_OCR_TEXT__;
+  });
+
+  it("shows alert preferences without requesting notification permission on open", () => {
+    render(<InventoryApp />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Preferências de avisos" }));
+
+    expect(screen.getByRole("heading", { name: "Alertas de validade" })).toBeVisible();
+    expect(screen.getByLabelText("30 dias antes")).toBeChecked();
+    expect(screen.getByText("Lotes em atenção")).toBeVisible();
+    expect(screen.getByText(/não oferece avisos locais/u)).toBeVisible();
   });
 });
 

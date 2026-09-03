@@ -1,5 +1,10 @@
 import { applyConfirmedMovement } from "@/features/inventory/domain/movements";
 import { devInventoryCatalog } from "@/features/inventory/fixtures/dev-catalog";
+import {
+  defaultAlertPreferences,
+  type AlertDeliveryRecord,
+  type AlertPreferences
+} from "@/features/inventory/notifications/alerts";
 import type {
   InventoryCatalog,
   InventoryMovement,
@@ -16,6 +21,8 @@ const STORAGE_KEY = "controle-validades:inventory:v1";
 export type InventoryStoreState = InventoryCatalog &
   Readonly<{
     movements: readonly InventoryMovement[];
+    alertPreferences: AlertPreferences;
+    alertDeliveries: readonly AlertDeliveryRecord[];
   }>;
 
 export type ManualLotInput = Readonly<{
@@ -54,6 +61,8 @@ export function createInitialInventoryState(): InventoryStoreState {
   return {
     ...devInventoryCatalog,
     lots: devInventoryCatalog.lots.map((lot) => ({ ...lot })),
+    alertPreferences: defaultAlertPreferences,
+    alertDeliveries: [],
     movements: [
       createMovement({
         type: "ENTRY",
@@ -101,7 +110,7 @@ export function loadInventoryState() {
   }
 
   try {
-    return JSON.parse(stored) as InventoryStoreState;
+    return hydrateStoredState(JSON.parse(stored) as Partial<InventoryStoreState>);
   } catch {
     return createInitialInventoryState();
   }
@@ -246,6 +255,39 @@ export function editLot(
   };
 }
 
+export function updateAlertPreferences(
+  state: InventoryStoreState,
+  alertPreferences: AlertPreferences
+): InventoryStoreState {
+  return {
+    ...state,
+    alertPreferences
+  };
+}
+
+export function recordAlertDeliveries(
+  state: InventoryStoreState,
+  alertDeliveries: readonly AlertDeliveryRecord[]
+): InventoryStoreState {
+  if (alertDeliveries.length === 0) {
+    return state;
+  }
+
+  const knownIds = new Set(state.alertDeliveries.map((delivery) => delivery.id));
+  const newDeliveries = alertDeliveries.filter(
+    (delivery) => !knownIds.has(delivery.id)
+  );
+
+  if (newDeliveries.length === 0) {
+    return state;
+  }
+
+  return {
+    ...state,
+    alertDeliveries: [...newDeliveries, ...state.alertDeliveries]
+  };
+}
+
 function createMovement(input: {
   type: InventoryMovementType;
   productId: ProductId;
@@ -269,6 +311,24 @@ function createMovement(input: {
     metadata: input.metadata ?? {},
     occurredAt: input.occurredAt,
     createdAt: input.occurredAt
+  };
+}
+
+function hydrateStoredState(
+  stored: Partial<InventoryStoreState>
+): InventoryStoreState {
+  const initial = createInitialInventoryState();
+
+  return {
+    ...initial,
+    ...stored,
+    products: stored.products ?? initial.products,
+    packagingConversions:
+      stored.packagingConversions ?? initial.packagingConversions,
+    lots: stored.lots ?? initial.lots,
+    movements: stored.movements ?? initial.movements,
+    alertPreferences: stored.alertPreferences ?? defaultAlertPreferences,
+    alertDeliveries: stored.alertDeliveries ?? []
   };
 }
 
