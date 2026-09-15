@@ -77,7 +77,7 @@ Web Push entrega notificações pelo service worker, inclusive com o app fechado
 
 Configuração exclusiva do servidor no Netlify: `FIREBASE_ADMIN_CREDENTIALS` (JSON de conta de serviço com acesso Firestore), `WEB_PUSH_PUBLIC_KEY` e `WEB_PUSH_PRIVATE_KEY` (par VAPID). Nunca use prefixo NEXT_PUBLIC em secrets. Sem configuração, UI informa indisponibilidade e build/testes continuam funcionando. Monitore falhas da função agendada nos logs do Netlify.
 
-O runtime Node 24 do Netlify/Lambda precisa de `NODE_OPTIONS=--experimental-require-module` para carregar a dependência JWKS do Firebase Admin atual. `scripts/configure-push.mjs` configura isso junto das credenciais usando sessões CLI existentes, sem imprimir secrets. `--verify` confere acesso real ao Firestore. A flag segue a [documentação do runtime Lambda](https://docs.aws.amazon.com/lambda/latest/dg/lambda-nodejs.html#nodejs-experimental).
+O runtime Netlify/Lambda desativa `require(esm)`. O override de `jwks-rsa` em `package.json` mantém o Firebase Admin compatível sem flags experimentais; `npm run test:server-runtime` reproduz essa restrição e é obrigatório no CI. O override de `uuid` corrige uma vulnerabilidade transitiva. `scripts/configure-push.mjs` configura credenciais usando sessões CLI existentes, sem imprimir secrets; `--verify` confere acesso real ao Firestore.
 
 ## Domínio
 

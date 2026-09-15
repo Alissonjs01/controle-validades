@@ -45,13 +45,6 @@ const net = (url, method, data) =>
 const site = await net(`/sites/${siteId}`);
 const envUrl = `/accounts/${site.account_id}/env?site_id=${siteId}`;
 const env = await net(envUrl);
-// Lambda disables require(esm), which Firebase Admin's current JWKS dependency needs.
-const nodeOptions = env.find((item) => item.key === "NODE_OPTIONS");
-if (!nodeOptions) {
-  await net(envUrl, "POST", [{ key: "NODE_OPTIONS", values: [{ context: "production", value: "--experimental-require-module" }] }]);
-} else if (!nodeOptions.values.some((entry) => entry.context === "production" && entry.value.includes("--experimental-require-module"))) {
-  throw new Error("Existing NODE_OPTIONS needs require-module enabled; preserve other options.");
-}
 if (process.argv.includes("--verify")) {
   const item = env.find((item) => item.key === "FIREBASE_ADMIN_CREDENTIALS");
   const value = item?.values.find(
