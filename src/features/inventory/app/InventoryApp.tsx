@@ -121,9 +121,12 @@ const getOnlineSnapshot = () =>
 const getServerOnlineSnapshot = () => true;
 
 export function InventoryApp() {
-  const firestoreRepository = useMemo(
+  const initialFirestoreRepository = useMemo(
     () => createFirestoreInventoryRepository(),
     []
+  );
+  const [firestoreRepository, setFirestoreRepository] = useState(
+    initialFirestoreRepository
   );
   const [state, setState] = useState<InventoryStoreState>(() =>
     loadInventoryState()
@@ -140,7 +143,7 @@ export function InventoryApp() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isOcrOpen, setIsOcrOpen] = useState(false);
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
-  const [isCloudLoading, setIsCloudLoading] = useState(Boolean(firestoreRepository));
+  const [isCloudLoading, setIsCloudLoading] = useState(Boolean(initialFirestoreRepository));
   const isHydrated = useSyncExternalStore(
     subscribeToHydration,
     getHydratedSnapshot,
@@ -180,6 +183,7 @@ export function InventoryApp() {
           return;
         }
 
+        setFirestoreRepository(null);
         setToast("Não foi possível conectar ao Firebase. Usando modo local.");
       })
       .finally(() => {

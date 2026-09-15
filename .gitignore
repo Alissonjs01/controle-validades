@@ -21,6 +21,8 @@ test-results/
 .env.development
 .env.production
 !.env.example
+.cli-config/
+.firebase/
 
 # system/editor
 .DS_Store
