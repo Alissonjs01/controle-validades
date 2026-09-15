@@ -1,6 +1,0 @@
-<svg width="640" height="360" viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Etiqueta artificial de validade">
-  <rect width="640" height="360" fill="#f8f6ed"/>
-  <rect x="70" y="86" width="500" height="180" rx="26" fill="#ffffff" stroke="#1f2a24" stroke-width="4"/>
-  <text x="112" y="170" fill="#111513" font-family="Arial, sans-serif" font-size="54" font-weight="700">FAB 02/08/2026</text>
-  <text x="112" y="235" fill="#111513" font-family="Arial, sans-serif" font-size="58" font-weight="700">VAL 18/11/2026</text>
-</svg>

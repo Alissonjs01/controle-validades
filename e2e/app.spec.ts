@@ -1,11 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import path from "node:path";
 
-declare global {
-  interface Window {
-    __CONTROLE_VALIDADES_OCR_TEXT__?: string;
-  }
-}
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -71,34 +65,11 @@ test("zeroes a lot after confirmation", async ({ page }) => {
   await expect(page.getByText("10/09/2026")).toHaveCount(0);
 });
 
-test("uses OCR date capture to pre-fill a new lot", async ({ page }) => {
-  await page.addInitScript(() => {
-    window.__CONTROLE_VALIDADES_OCR_TEXT__ =
-      "FAB 02/08/2026 VAL 18/11/2026";
-  });
-  await page.reload();
-
-  await page.getByRole("button", { name: "Ler validade" }).click();
-  await page
-    .getByLabel("Foto da validade")
-    .setInputFiles(path.join(process.cwd(), "e2e/fixtures/validade-18-11-2026.svg"));
-
-  await expect(page.getByText("Qual é a validade?")).toBeVisible();
-  await expect(page.getByRole("button", { name: "18/11/2026" })).toHaveAttribute(
-    "aria-pressed",
-    "true"
-  );
-
-  await page.getByRole("button", { name: "Usar validade" }).click();
-  const newLotDialog = page.getByRole("dialog", { name: "Novo lote" });
-  await expect(newLotDialog).toBeVisible();
-  await expect(newLotDialog.getByLabel("Validade")).toHaveValue("2026-11-18");
-
-  await newLotDialog.getByLabel("Quantidade").fill("2");
-  await newLotDialog.getByRole("button", { name: "Salvar" }).click();
-
-  await expect(page.getByRole("status")).toContainText("Entrada registrada");
-  await expect(page.getByText("18/11/2026")).toBeVisible();
+test("shows notifications and no camera action", async ({ page }) => {
+  await expect(page.getByRole("button", { name: "Ler validade" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Preferências de avisos" }).click();
+  await expect(page.getByRole("heading", { name: "Alertas de validade" })).toBeVisible();
+  await expect(page.getByLabel("30 dias antes")).toBeChecked();
 });
 
 test("edits a lot and keeps the adjustment in history", async ({ page }) => {

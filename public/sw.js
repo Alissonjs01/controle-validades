@@ -1,4 +1,4 @@
-const CACHE_NAME = "controle-validades-final-v1";
+const CACHE_NAME = "controle-validades-push-v2";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -48,4 +48,16 @@ self.addEventListener("notificationclick", (event) => {
         return self.clients.openWindow("/");
       })
   );
+});
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try { payload = event.data?.json() ?? {}; } catch { /* Always show a notification. */ }
+  event.waitUntil(self.registration.showNotification(payload.title || "ValiddA", {
+    body: payload.body || "Confira os lotes que exigem atenção.",
+    tag: payload.tag || "expiry-alert",
+    icon: "/icons/pwa-icon-192.png",
+    badge: "/icons/pwa-icon-192.png",
+    data: { url: "/" }
+  }));
 });

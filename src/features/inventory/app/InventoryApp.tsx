@@ -5,7 +5,6 @@ import {
   Archive,
   BellNotification,
   Calendar,
-  Camera,
   Check,
   ClockRotateRight,
   CloudDesync,
@@ -18,6 +17,7 @@ import {
   Xmark
 } from "iconoir-react";
 
+import { AlertsSheet } from "@/features/inventory/notifications/AlertsSheet";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
@@ -28,13 +28,10 @@ import {
   applyInventoryMovement,
   editLot,
   loadInventoryState,
-  recordAlertDeliveries,
   saveInventoryState,
-  updateAlertPreferences,
   type InventoryStoreState
 } from "@/features/inventory/app/local-inventory-store";
 import { createFirestoreInventoryRepository } from "@/features/inventory/repositories/firestore-inventory-repository";
-import { parseBrazilianCivilDate } from "@/features/inventory/domain/dates";
 import {
   formatCivilDate,
   formatDaysRemaining,
@@ -48,17 +45,9 @@ import {
 } from "@/features/inventory/domain/display";
 import { getOpenLotsByFefo } from "@/features/inventory/domain/fefo";
 import {
-  createAlertDeliveries,
-  DEFAULT_ALERT_MILESTONES,
-  getAlertMilestoneLabel,
   getAlertSummary,
-  getDueExpiryAlerts,
-  getInternalAttentionLots,
-  type DueExpiryAlert
+  getInternalAttentionLots
 } from "@/features/inventory/notifications/alerts";
-import { recognizeExpirationDatesFromImage } from "@/features/inventory/ocr/browser-ocr";
-import type { OcrExpirationExtraction } from "@/features/inventory/ocr/expiration-date-extraction";
-import { normalizePortugueseText } from "@/features/inventory/parser/normalization";
 import {
   parseInventoryCommand,
   type ParsedCommand
@@ -81,16 +70,6 @@ type PendingCommand = Readonly<{
   command: ParsedCommand;
   selectedProductId: ProductId | null;
   selectedLotId: LotId | null;
-}>;
-
-type OcrReviewState = Readonly<{
-  phase: "idle" | "reading" | "review" | "error";
-  progress: number;
-  statusText: string;
-  result: OcrExpirationExtraction | null;
-  selectedDate: IsoDate | null;
-  manualDate: string;
-  errorMessage: string | null;
 }>;
 
 const filters: readonly { key: FilterKey; label: string }[] = [
@@ -138,10 +117,7 @@ export function InventoryApp() {
   );
   const [selectedLotId, setSelectedLotId] = useState<LotId | null>(null);
   const [isManualOpen, setIsManualOpen] = useState(false);
-  const [manualInitialExpirationDate, setManualInitialExpirationDate] =
-    useState<IsoDate | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isOcrOpen, setIsOcrOpen] = useState(false);
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
   const [isCloudLoading, setIsCloudLoading] = useState(Boolean(initialFirestoreRepository));
   const isHydrated = useSyncExternalStore(
@@ -237,54 +213,12 @@ export function InventoryApp() {
     () => getInternalAttentionLots(activeLots, referenceDate),
     [activeLots, referenceDate]
   );
-  const dueBrowserAlerts = useMemo(
-    () =>
-      getDueExpiryAlerts({
-        lots: activeLots,
-        products: state.products,
-        preferences: state.alertPreferences,
-        deliveries: state.alertDeliveries,
-        referenceDate
-      }),
-    [
-      activeLots,
-      referenceDate,
-      state.alertDeliveries,
-      state.alertPreferences,
-      state.products
-    ]
-  );
   const attentionCount = activeLots.filter(
     (lot) => getDaysUntilExpiration(lot.expirationDate, referenceDate) <= 30
   ).length;
   const expiredCount = activeLots.filter(
     (lot) => getDaysUntilExpiration(lot.expirationDate, referenceDate) < 0
   ).length;
-
-  useEffect(() => {
-    if (dueBrowserAlerts.length === 0) {
-      return;
-    }
-
-    void deliverDueBrowserAlerts(dueBrowserAlerts).then((deliveredAlerts) => {
-      if (deliveredAlerts.length === 0) {
-        return;
-      }
-
-      const deliveries = createAlertDeliveries(
-        deliveredAlerts,
-        new Date().toISOString()
-      );
-
-      if (firestoreRepository) {
-        void firestoreRepository.recordAlertDeliveries(deliveries);
-      }
-
-      setState((current) =>
-        recordAlertDeliveries(current, deliveries)
-      );
-    });
-  }, [dueBrowserAlerts, firestoreRepository]);
 
   function submitCommand(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -410,12 +344,6 @@ export function InventoryApp() {
           </div>
           <div className="topbar-actions">
             <IconButton
-              aria-label="Ler validade"
-              onClick={() => setIsOcrOpen(true)}
-            >
-              <Camera aria-hidden="true" />
-            </IconButton>
-            <IconButton
               aria-label="Preferências de avisos"
               onClick={() => setIsAlertsOpen(true)}
             >
@@ -430,7 +358,6 @@ export function InventoryApp() {
             <IconButton
               aria-label="Novo lote manual"
               onClick={() => {
-                setManualInitialExpirationDate(null);
                 setIsManualOpen(true);
               }}
             >
@@ -588,10 +515,8 @@ export function InventoryApp() {
 
       {isManualOpen ? (
         <ManualLotSheet
-          initialExpirationDate={manualInitialExpirationDate}
           onClose={() => {
             setIsManualOpen(false);
-            setManualInitialExpirationDate(null);
           }}
           onSave={(input) => {
             void (async () => {
@@ -625,7 +550,6 @@ export function InventoryApp() {
                   setState((current) => addManualLot(current, input));
                 }
                 setIsManualOpen(false);
-                setManualInitialExpirationDate(null);
                 setToast("Entrada registrada");
               } catch (error) {
                 setToast(toFriendlyError(error));
@@ -636,37 +560,10 @@ export function InventoryApp() {
         />
       ) : null}
 
-      {isOcrOpen ? (
-        <OcrSheet
-          onClose={() => setIsOcrOpen(false)}
-          onConfirmDate={(date) => {
-            setIsOcrOpen(false);
-            setManualInitialExpirationDate(date);
-            setIsManualOpen(true);
-            setToast("Validade preenchida");
-          }}
-          referenceDate={referenceDate}
-        />
-      ) : null}
-
       {isAlertsOpen ? (
         <AlertsSheet
           activeLots={activeLots}
-          alerts={dueBrowserAlerts}
           onClose={() => setIsAlertsOpen(false)}
-          onSavePreferences={(preferences) => {
-            void (async () => {
-              if (firestoreRepository) {
-                await firestoreRepository.updateAlertPreferences(preferences);
-              }
-
-              setState((current) => updateAlertPreferences(current, preferences));
-              setToast(
-                preferences.enabled ? "Avisos atualizados" : "Avisos pausados"
-              );
-            })();
-          }}
-          preferences={state.alertPreferences}
           products={state.products}
           referenceDate={referenceDate}
         />
@@ -960,349 +857,11 @@ function MovementConfirmation({
   );
 }
 
-function OcrSheet({
-  onClose,
-  onConfirmDate,
-  referenceDate
-}: {
-  onClose: () => void;
-  onConfirmDate: (date: IsoDate) => void;
-  referenceDate: IsoDate;
-}) {
-  const [ocrState, setOcrState] = useState<OcrReviewState>({
-    phase: "idle",
-    progress: 0,
-    statusText: "",
-    result: null,
-    selectedDate: null,
-    manualDate: "",
-    errorMessage: null
-  });
-  const selectedCandidate =
-    ocrState.selectedDate && ocrState.result
-      ? ocrState.result.candidates.find(
-          (candidate) => candidate.isoDate === ocrState.selectedDate
-        ) ?? null
-      : null;
-  const parsedManualDate = parseManualOcrDate(ocrState.manualDate, referenceDate);
-  const confirmDate = parsedManualDate ?? ocrState.selectedDate;
-  const warnings = selectedCandidate?.warnings.length
-    ? selectedCandidate.warnings
-    : confirmDate
-      ? getOcrDateWarnings(confirmDate, referenceDate)
-      : [];
-
-  async function readImage(file: File | null) {
-    if (!file) {
-      return;
-    }
-
-    if (!file.type.startsWith("image/")) {
-      setOcrState({
-        phase: "error",
-        progress: 0,
-        statusText: "",
-        result: null,
-        selectedDate: null,
-        manualDate: "",
-        errorMessage: "Escolha uma imagem da validade."
-      });
-      return;
-    }
-
-    setOcrState({
-      phase: "reading",
-      progress: 0,
-      statusText: "Preparando imagem",
-      result: null,
-      selectedDate: null,
-      manualDate: "",
-      errorMessage: null
-    });
-
-    try {
-      const result = await recognizeExpirationDatesFromImage(file, {
-        referenceDate,
-        onProgress: (progress, status) =>
-          setOcrState((current) => ({
-            ...current,
-            phase: "reading",
-            progress,
-            statusText: status
-          }))
-      });
-      const selectedDate = result.suggestedCandidate?.isoDate ?? null;
-
-      setOcrState({
-        phase: result.candidates.length > 0 ? "review" : "error",
-        progress: 1,
-        statusText: "Leitura concluída",
-        result,
-        selectedDate,
-        manualDate: selectedDate ? formatCivilDate(selectedDate) : "",
-        errorMessage:
-          result.candidates.length > 0
-            ? null
-            : "Não encontrei uma validade clara nessa imagem."
-      });
-    } catch {
-      setOcrState({
-        phase: "error",
-        progress: 0,
-        statusText: "",
-        result: null,
-        selectedDate: null,
-        manualDate: "",
-        errorMessage: "Não foi possível ler a imagem. Você pode digitar a validade."
-      });
-    }
-  }
-
-  return (
-    <div className="sheet-backdrop" role="presentation">
-      <section aria-labelledby="ocr-title" className="bottom-sheet" role="dialog">
-        <div className="sheet-handle" />
-        <div className="sheet-heading">
-          <div>
-            <span className="eyebrow">Câmera</span>
-            <h2 id="ocr-title">Ler validade</h2>
-          </div>
-          <IconButton aria-label="Fechar leitura de validade" onClick={onClose}>
-            <Xmark aria-hidden="true" />
-          </IconButton>
-        </div>
-
-        <p className="sheet-muted">
-          Fotografe só a área onde aparece VAL, VENC ou validade. A imagem é
-          processada no navegador e descartada depois da leitura.
-        </p>
-
-        <label className="capture-control">
-          <Camera aria-hidden="true" />
-          <span>Tirar foto ou escolher imagem</span>
-          <input
-            accept="image/*"
-            aria-label="Foto da validade"
-            capture="environment"
-            onChange={(event) => void readImage(event.target.files?.[0] ?? null)}
-            type="file"
-          />
-        </label>
-
-        {ocrState.phase === "reading" ? (
-          <div className="ocr-progress" role="status">
-            <span>Processando OCR</span>
-            <progress max={1} value={ocrState.progress} />
-            <small>{ocrState.statusText || "Lendo imagem"}</small>
-          </div>
-        ) : null}
-
-        {ocrState.result?.candidates.length ? (
-          <ChoiceGroup
-            label={
-              ocrState.result.candidates.length > 1
-                ? "Qual é a validade?"
-                : "Validade encontrada"
-            }
-            onSelect={(date) =>
-              setOcrState((current) => ({
-                ...current,
-                selectedDate: date as IsoDate,
-                manualDate: formatCivilDate(date as IsoDate)
-              }))
-            }
-            options={ocrState.result.candidates.map((candidate) => ({
-              id: candidate.isoDate,
-              label: candidate.displayDate
-            }))}
-            selectedId={ocrState.selectedDate}
-          />
-        ) : null}
-
-        {ocrState.errorMessage ? (
-          <MessageBlock messages={[ocrState.errorMessage]} tone="danger" />
-        ) : null}
-
-        {ocrState.result?.invalidCandidates.length ? (
-          <MessageBlock
-            messages={ocrState.result.invalidCandidates.map(
-              (candidate) => `${candidate.source} não é uma data válida.`
-            )}
-            tone="info"
-          />
-        ) : null}
-
-        <TextField
-          inputMode="numeric"
-          label="Corrigir validade"
-          onChange={(value) =>
-            setOcrState((current) => ({
-              ...current,
-              manualDate: value
-            }))
-          }
-          placeholder="DD/MM/AAAA"
-          value={ocrState.manualDate}
-        />
-
-        {warnings.length > 0 ? <MessageBlock messages={warnings} tone="info" /> : null}
-
-        <div className="sheet-actions">
-          <Button onClick={onClose} variant="secondary">
-            Cancelar
-          </Button>
-          <Button disabled={!confirmDate} onClick={() => confirmDate && onConfirmDate(confirmDate)}>
-            <Check aria-hidden="true" />
-            Usar validade
-          </Button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function AlertsSheet({
-  activeLots,
-  alerts,
-  onClose,
-  onSavePreferences,
-  preferences,
-  products,
-  referenceDate
-}: {
-  activeLots: readonly Lot[];
-  alerts: readonly DueExpiryAlert[];
-  onClose: () => void;
-  onSavePreferences: (preferences: InventoryStoreState["alertPreferences"]) => void;
-  preferences: InventoryStoreState["alertPreferences"];
-  products: readonly Product[];
-  referenceDate: IsoDate;
-}) {
-  const [selectedMilestones, setSelectedMilestones] = useState(
-    new Set(preferences.milestones)
-  );
-  const internalLots = getInternalAttentionLots(activeLots, referenceDate);
-  const notificationSupport = getNotificationSupportLabel();
-
-  async function activateAlerts() {
-    const permission = await requestNotificationPermission();
-
-    onSavePreferences({
-      enabled: permission === "granted",
-      milestones: [...selectedMilestones].sort((left, right) => right - left)
-    });
-  }
-
-  return (
-    <div className="sheet-backdrop" role="presentation">
-      <section aria-labelledby="alerts-title" className="bottom-sheet" role="dialog">
-        <div className="sheet-handle" />
-        <div className="sheet-heading">
-          <div>
-            <span className="eyebrow">Avisos</span>
-            <h2 id="alerts-title">Alertas de validade</h2>
-          </div>
-          <IconButton aria-label="Fechar avisos" onClick={onClose}>
-            <Xmark aria-hidden="true" />
-          </IconButton>
-        </div>
-
-        <p className="sheet-muted">
-          O app destaca lotes críticos ao abrir. Avisos do navegador só são pedidos
-          depois que você ativar.
-        </p>
-
-        <div className="alert-preferences">
-          {DEFAULT_ALERT_MILESTONES.map((milestone) => (
-            <label key={milestone}>
-              <input
-                checked={selectedMilestones.has(milestone)}
-                onChange={(event) => {
-                  const next = new Set(selectedMilestones);
-
-                  if (event.target.checked) {
-                    next.add(milestone);
-                  } else {
-                    next.delete(milestone);
-                  }
-
-                  setSelectedMilestones(next);
-                }}
-                type="checkbox"
-              />
-              <span>{getAlertMilestoneLabel(milestone)}</span>
-            </label>
-          ))}
-        </div>
-
-        <MessageBlock
-          messages={[
-            notificationSupport,
-            "Sem push em segundo plano confiável em todos os PWAs, os alertas internos continuam sendo a fonte principal."
-          ]}
-          tone="info"
-        />
-
-        {alerts.length > 0 ? (
-          <section className="due-alerts" aria-label="Avisos pendentes">
-            <h3>Avisos pendentes</h3>
-            {alerts.map((alert) => (
-              <p key={alert.id}>
-                <strong>{alert.title}</strong>
-                <span>{alert.body}</span>
-              </p>
-            ))}
-          </section>
-        ) : null}
-
-        <section className="due-alerts" aria-label="Lotes em atenção">
-          <h3>Lotes em atenção</h3>
-          {internalLots.length > 0 ? (
-            internalLots.map((lot) => (
-              <p key={lot.id}>
-                <strong>{getProductName(products, lot.productId)}</strong>
-                <span>
-                  {formatCivilDate(lot.expirationDate)} •{" "}
-                  {formatDaysRemaining(
-                    getDaysUntilExpiration(lot.expirationDate, referenceDate)
-                  )}
-                </span>
-              </p>
-            ))
-          ) : (
-            <p className="sheet-muted">Nenhum lote exige atenção agora.</p>
-          )}
-        </section>
-
-        <div className="sheet-actions">
-          <Button
-            onClick={() =>
-              onSavePreferences({
-                enabled: false,
-                milestones: [...selectedMilestones].sort((left, right) => right - left)
-              })
-            }
-            variant="secondary"
-          >
-            Pausar avisos
-          </Button>
-          <Button disabled={selectedMilestones.size === 0} onClick={() => void activateAlerts()}>
-            <BellNotification aria-hidden="true" />
-            Ativar avisos
-          </Button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function ManualLotSheet({
-  initialExpirationDate,
   onClose,
   onSave,
   state
 }: {
-  initialExpirationDate: IsoDate | null;
   onClose: () => void;
   onSave: (input: {
     productId: ProductId;
@@ -1324,7 +883,7 @@ function ManualLotSheet({
     ? conversionId
     : conversions[0]?.id ?? "";
   const [quantity, setQuantity] = useState("1");
-  const [expirationDate, setExpirationDate] = useState(initialExpirationDate ?? "");
+  const [expirationDate, setExpirationDate] = useState("");
 
   return (
     <div className="sheet-backdrop" role="presentation">
@@ -1829,90 +1388,6 @@ function humanizeIssue(issue: string) {
   };
 
   return labels[issue] ?? issue;
-}
-
-function parseManualOcrDate(value: string, referenceDate: IsoDate) {
-  const parsed = parseBrazilianCivilDate(
-    normalizePortugueseText(value),
-    referenceDate
-  );
-
-  return parsed.kind === "complete" ? parsed.value : null;
-}
-
-function getOcrDateWarnings(date: IsoDate, referenceDate: IsoDate) {
-  const days = getDaysUntilExpiration(date, referenceDate);
-
-  if (days < 0) {
-    return ["Essa data já passou. Confira antes de confirmar."];
-  }
-
-  if (days > 6 * 366) {
-    return ["Essa validade parece muito distante. Confira a leitura."];
-  }
-
-  return [];
-}
-
-async function requestNotificationPermission() {
-  if (typeof window === "undefined" || !("Notification" in window)) {
-    return "unsupported";
-  }
-
-  if (Notification.permission === "granted") {
-    return "granted";
-  }
-
-  if (Notification.permission === "denied") {
-    return "denied";
-  }
-
-  return Notification.requestPermission();
-}
-
-function getNotificationSupportLabel() {
-  if (typeof window === "undefined" || !("Notification" in window)) {
-    return "Este navegador não oferece avisos locais.";
-  }
-
-  if (Notification.permission === "granted") {
-    return "Avisos do navegador estão ativos neste dispositivo.";
-  }
-
-  if (Notification.permission === "denied") {
-    return "O navegador bloqueou avisos. Os alertas internos continuam funcionando.";
-  }
-
-  return "Toque em Ativar avisos para permitir notificações deste app.";
-}
-
-async function deliverDueBrowserAlerts(alerts: readonly DueExpiryAlert[]) {
-  if (
-    typeof window === "undefined" ||
-    !("Notification" in window) ||
-    Notification.permission !== "granted"
-  ) {
-    return [];
-  }
-
-  const registration =
-    "serviceWorker" in navigator ? await navigator.serviceWorker.ready : null;
-
-  for (const alert of alerts) {
-    const options: NotificationOptions = {
-      body: alert.body,
-      icon: "/icons/pwa-icon-192.png",
-      tag: alert.id
-    };
-
-    if (registration) {
-      await registration.showNotification(alert.title, options);
-    } else {
-      new Notification(alert.title, options);
-    }
-  }
-
-  return alerts;
 }
 
 function toFriendlyError(error: unknown) {

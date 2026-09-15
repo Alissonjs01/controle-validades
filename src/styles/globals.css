@@ -562,7 +562,6 @@ p {
 .filter-tab:focus-visible,
 .choice-group button:focus-visible,
 .attention-strip:focus-visible,
-.capture-control:focus-within,
 .form-field input:focus-visible,
 .form-field select:focus-visible,
 .movement-composer__input:focus-visible,
@@ -684,48 +683,6 @@ p {
 .movement-composer__send--loading {
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-ink) 9%, transparent);
-}
-
-.capture-control {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  min-height: 56px;
-  margin-top: 16px;
-  border: 1px solid rgba(145, 183, 161, 0.34);
-  border-radius: 999px;
-  background: rgba(145, 183, 161, 0.16);
-  color: var(--color-ink);
-  cursor: pointer;
-  font-weight: 560;
-}
-
-.capture-control input {
-  position: absolute;
-  inset: 0;
-  cursor: pointer;
-  opacity: 0;
-}
-
-.ocr-progress {
-  display: grid;
-  gap: 8px;
-  margin-top: 14px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
-  background: var(--color-field);
-  padding: 12px;
-}
-
-.ocr-progress progress {
-  width: 100%;
-  accent-color: var(--color-accent);
-}
-
-.ocr-progress small {
-  color: var(--color-muted);
 }
 
 .sheet-backdrop {

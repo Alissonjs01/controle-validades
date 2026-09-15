@@ -2,7 +2,7 @@
 
 PWA mobile-first para responder uma pergunta simples: **o que tenho, quanto tenho e o que está perto de vencer?**
 
-O projeto já possui fundação PWA, domínio/parser determinístico, interface principal de movimentações, OCR local de validade, alertas internos e adapter Firebase/Firestore em produção. Ainda não implementa IA nem login complexo.
+O projeto já possui fundação PWA, domínio/parser determinístico, interface principal de movimentações, notificações Web Push, alertas internos e adapter Firebase/Firestore em produção. Ainda não implementa IA nem login complexo.
 
 ## Stack
 
@@ -10,7 +10,6 @@ O projeto já possui fundação PWA, domínio/parser determinístico, interface 
 - React + TypeScript strict
 - Firebase Web SDK com Firestore realtime, sem depender de credenciais reais em teste local
 - Iconoir como biblioteca principal de ícones
-- Tesseract.js carregado sob demanda para OCR no navegador
 - CSS moderno com tokens próprios de design
 - Vitest + Testing Library para testes unitários/de componentes
 - Playwright para E2E mobile/desktop
@@ -58,36 +57,25 @@ A UI atual cobre:
 - cadastro manual simples de lote;
 - edição de quantidade/produto/validade com movimento `ADJUSTMENT`;
 - histórico geral e histórico do lote;
-- leitura de validade por câmera/arquivo com confirmação e correção;
 - alertas internos e preferências de aviso;
 - toasts e mensagens amigáveis de erro.
 
 Sem Firebase real, a interface usa o adapter local em `src/features/inventory/app/local-inventory-store.ts`, persistindo dados de desenvolvimento no `localStorage`. Quando as variáveis públicas do Firebase existem, o app usa o repositório Firestore em `src/features/inventory/repositories/firestore-inventory-repository.ts`, com snapshots em tempo real para refletir alterações feitas em outro celular, tablet ou navegador.
 
-## Câmera e OCR
+## Avisos no aparelho
 
-O fluxo `Ler validade` usa `input type="file" accept="image/*" capture="environment"` para abrir câmera no mobile e seletor de imagem no desktop.
+Fotos/OCR foram removidos. O cadastro permanece por texto ou formulário.
 
-O OCR fica em `src/features/inventory/ocr`:
+Web Push entrega notificações pelo service worker, inclusive com o app fechado. No iPhone/iPad (16.4+), adicione à Tela de Início e abra pelo ícone antes de tocar em **Ativar avisos**. A permissão é solicitada somente após esse toque. **Enviar notificação de teste** verifica o caminho servidor -> aparelho.
 
-- `browser-ocr.ts` carrega `tesseract.js` somente quando o usuário escolhe uma imagem;
-- a imagem é pré-processada no navegador com canvas simples e descartada após leitura;
-- nenhuma foto é enviada para APIs pagas ou serviços de IA;
-- `expiration-date-extraction.ts` reutiliza a regra de datas civis do domínio.
+- Cada aparelho escolhe 30, 15, 7 dias e no vencimento, e pode pausar separadamente.
+- Netlify executa `netlify/functions/expiry-alerts.ts` a cada hora das 8h às 20h de Brasília. Apenas deploy de produção executa agendamentos.
+- Se um lote é cadastrado entre marcos, recebe aviso na faixa atual. Vencidos com estoque geram um resumo diário quando algum marco estiver habilitado.
+- Entregas são deduplicadas por aparelho, lote, validade e marco; transação com lease evita execuções simultâneas. Falhas permitem nova tentativa; inscrições expiradas são desativadas.
+- Confirmação do serviço push significa aceitação para envio, não prova de leitura. Conexão, Modo Foco, permissões, limites da hospedagem e sistema operacional podem atrasar/silenciar avisos. Não há garantia absoluta de entrega; a lista de atenção permanece disponível.
+- `pushDevices` é uma coleção privada, acessível somente pelo backend. APIs verificam token Firebase e dono da inscrição, validam provedores e limitam testes por aparelho.
 
-Quando há múltiplas datas, a UI mostra opções. A validade detectada sempre exige confirmação e pode ser corrigida manualmente antes de preencher o cadastro de lote.
-
-## Alertas
-
-Alertas ficam em `src/features/inventory/notifications`.
-
-- Preferências padrão: 30, 15, 7 dias e no vencimento.
-- O app registra marcos já emitidos para evitar repetição.
-- Lotes zerados/encerrados não geram alertas.
-- O alerta interno funciona sempre ao abrir o app.
-- Notificações do navegador só são solicitadas após o usuário tocar em `Ativar avisos`.
-
-Limitação real: PWAs não têm push/background confiável em todos os navegadores sem backend de push. Por isso, a versão atual usa Notification API quando disponível e mantém alertas internos como degradação segura.
+Configuração exclusiva do servidor no Netlify: `FIREBASE_ADMIN_CREDENTIALS` (JSON de conta de serviço com acesso Firestore), `WEB_PUSH_PUBLIC_KEY` e `WEB_PUSH_PRIVATE_KEY` (par VAPID). Nunca use prefixo NEXT_PUBLIC em secrets. Sem configuração, UI informa indisponibilidade e build/testes continuam funcionando. Monitore falhas da função agendada nos logs do Netlify.
 
 ## Domínio
 
@@ -233,7 +221,6 @@ Os testes principais estão junto do domínio/parser:
 - `src/features/inventory/domain/fefo.test.ts`
 - `src/features/inventory/domain/movements.test.ts`
 - `src/features/inventory/notifications/alerts.test.ts`
-- `src/features/inventory/ocr/expiration-date-extraction.test.ts`
 - `src/features/inventory/app/InventoryApp.test.tsx`
 - `e2e/app.spec.ts`
 
@@ -243,5 +230,5 @@ Para adicionar novo tipo de embalagem, crie conversão no produto, aliases corre
 
 1. Validar no uso real se o workspace compartilhado atende à operação da equipe.
 2. Adicionar login real e regras por usuário/equipe se o acesso precisar ser restrito.
-3. Evoluir push/background se houver backend de notificações.
+3. Acompanhar entregas e falhas das notificações agendadas no Netlify.
 4. Ampliar catálogo e aliases conforme os produtos reais forem aparecendo.
