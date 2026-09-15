@@ -37,28 +37,27 @@ import type {
 } from "@/types/inventory";
 
 const WORKSPACE_COLLECTION = "inventory";
-const DEFAULT_WORKSPACE_ID = "default";
 
 export class FirestoreInventoryRepository {
   constructor(private readonly db: Firestore) {}
 
   async getState() {
-    await ensureFirebaseAnonymousAuth();
+    const workspaceId = await this.getWorkspaceId();
 
-    const state = await this.readState();
+    const state = await this.readState(workspaceId);
 
     if (state.products.length > 0) {
       return state;
     }
 
     const initialState = createInitialInventoryState();
-    await this.seedInitialState(initialState);
+    await this.seedInitialState(workspaceId, initialState);
 
     return initialState;
   }
 
   async createEntryLot(input: EntryIntentInput) {
-    await ensureFirebaseAnonymousAuth();
+    const workspaceId = await this.getWorkspaceId();
 
     const now = new Date().toISOString();
     const lot: Lot = {
@@ -84,18 +83,18 @@ export class FirestoreInventoryRepository {
     });
 
     const batch = writeBatch(this.db);
-    batch.set(this.lotDoc(lot.id), lot);
-    batch.set(this.movementDoc(movement.id), movement);
+    batch.set(this.lotDoc(workspaceId, lot.id), lot);
+    batch.set(this.movementDoc(workspaceId, movement.id), movement);
     await batch.commit();
 
     return { lot, movement };
   }
 
   async applyMovement(input: MovementIntentInput) {
-    await ensureFirebaseAnonymousAuth();
+    const workspaceId = await this.getWorkspaceId();
 
     return runTransaction(this.db, async (transaction) => {
-      const lotRef = this.lotDoc(input.lotId);
+      const lotRef = this.lotDoc(workspaceId, input.lotId);
       const lotSnapshot = await transaction.get(lotRef);
 
       if (!lotSnapshot.exists()) {
@@ -118,17 +117,20 @@ export class FirestoreInventoryRepository {
       );
 
       transaction.set(lotRef, application.lot);
-      transaction.set(this.movementDoc(application.movement.id), application.movement);
+      transaction.set(
+        this.movementDoc(workspaceId, application.movement.id),
+        application.movement
+      );
 
       return application;
     });
   }
 
   async editLot(input: LotEditInput) {
-    await ensureFirebaseAnonymousAuth();
+    const workspaceId = await this.getWorkspaceId();
 
     return runTransaction(this.db, async (transaction) => {
-      const lotRef = this.lotDoc(input.lotId);
+      const lotRef = this.lotDoc(workspaceId, input.lotId);
       const lotSnapshot = await transaction.get(lotRef);
 
       if (!lotSnapshot.exists()) {
@@ -166,20 +168,20 @@ export class FirestoreInventoryRepository {
       });
 
       transaction.set(lotRef, updatedLot);
-      transaction.set(this.movementDoc(movement.id), movement);
+      transaction.set(this.movementDoc(workspaceId, movement.id), movement);
 
       return { lot: updatedLot, movement };
     });
   }
 
   async updateAlertPreferences(alertPreferences: AlertPreferences) {
-    await ensureFirebaseAnonymousAuth();
+    const workspaceId = await this.getWorkspaceId();
 
-    await setDoc(this.settingsDoc("alerts"), alertPreferences);
+    await setDoc(this.settingsDoc(workspaceId, "alerts"), alertPreferences);
   }
 
   async recordAlertDeliveries(deliveries: readonly AlertDeliveryRecord[]) {
-    await ensureFirebaseAnonymousAuth();
+    const workspaceId = await this.getWorkspaceId();
 
     if (deliveries.length === 0) {
       return;
@@ -188,13 +190,15 @@ export class FirestoreInventoryRepository {
     const batch = writeBatch(this.db);
 
     for (const delivery of deliveries) {
-      batch.set(this.alertDeliveryDoc(delivery.id), delivery, { merge: true });
+      batch.set(this.alertDeliveryDoc(workspaceId, delivery.id), delivery, {
+        merge: true
+      });
     }
 
     await batch.commit();
   }
 
-  private async readState(): Promise<InventoryStoreState> {
+  private async readState(workspaceId: string): Promise<InventoryStoreState> {
     const [
       productsSnapshot,
       conversionsSnapshot,
@@ -203,12 +207,16 @@ export class FirestoreInventoryRepository {
       settingsSnapshot,
       deliveriesSnapshot
     ] = await Promise.all([
-      getDocs(this.productsCollection()),
-      getDocs(this.conversionsCollection()),
-      getDocs(query(this.lotsCollection(), orderBy("expirationDate", "asc"))),
-      getDocs(query(this.movementsCollection(), orderBy("occurredAt", "desc"))),
-      getDocs(this.settingsCollection()),
-      getDocs(this.alertDeliveriesCollection())
+      getDocs(this.productsCollection(workspaceId)),
+      getDocs(this.conversionsCollection(workspaceId)),
+      getDocs(
+        query(this.lotsCollection(workspaceId), orderBy("expirationDate", "asc"))
+      ),
+      getDocs(
+        query(this.movementsCollection(workspaceId), orderBy("occurredAt", "desc"))
+      ),
+      getDocs(this.settingsCollection(workspaceId)),
+      getDocs(this.alertDeliveriesCollection(workspaceId))
     ]);
 
     const settings = settingsSnapshot.docs.find((item) => item.id === "alerts");
@@ -231,80 +239,93 @@ export class FirestoreInventoryRepository {
     };
   }
 
-  private async seedInitialState(state: InventoryStoreState) {
+  private async seedInitialState(
+    workspaceId: string,
+    state: InventoryStoreState
+  ) {
     const batch = writeBatch(this.db);
 
     for (const product of state.products) {
-      batch.set(this.productDoc(product.id), product);
+      batch.set(this.productDoc(workspaceId, product.id), product);
     }
 
     for (const conversion of state.packagingConversions) {
-      batch.set(this.conversionDoc(conversion.id), conversion);
+      batch.set(this.conversionDoc(workspaceId, conversion.id), conversion);
     }
 
     for (const lot of state.lots) {
-      batch.set(this.lotDoc(lot.id), lot);
+      batch.set(this.lotDoc(workspaceId, lot.id), lot);
     }
 
     for (const movement of state.movements) {
-      batch.set(this.movementDoc(movement.id), movement);
+      batch.set(this.movementDoc(workspaceId, movement.id), movement);
     }
 
-    batch.set(this.settingsDoc("alerts"), state.alertPreferences);
+    batch.set(this.settingsDoc(workspaceId, "alerts"), state.alertPreferences);
 
     await batch.commit();
   }
 
-  private workspaceDoc() {
-    return doc(this.db, WORKSPACE_COLLECTION, DEFAULT_WORKSPACE_ID);
+  private async getWorkspaceId() {
+    const uid = await ensureFirebaseAnonymousAuth();
+
+    if (!uid) {
+      throw new Error("Firebase não está autenticado.");
+    }
+
+    return uid;
   }
 
-  private productsCollection() {
-    return collection(this.workspaceDoc(), "products");
+  private workspaceDoc(workspaceId: string) {
+    return doc(this.db, WORKSPACE_COLLECTION, workspaceId);
   }
 
-  private productDoc(id: string) {
-    return doc(this.productsCollection(), id);
+  private productsCollection(workspaceId: string) {
+    return collection(this.workspaceDoc(workspaceId), "products");
   }
 
-  private conversionsCollection() {
-    return collection(this.workspaceDoc(), "packagingConversions");
+  private productDoc(workspaceId: string, id: string) {
+    return doc(this.productsCollection(workspaceId), id);
   }
 
-  private conversionDoc(id: string) {
-    return doc(this.conversionsCollection(), id);
+  private conversionsCollection(workspaceId: string) {
+    return collection(this.workspaceDoc(workspaceId), "packagingConversions");
   }
 
-  private lotsCollection() {
-    return collection(this.workspaceDoc(), "lots");
+  private conversionDoc(workspaceId: string, id: string) {
+    return doc(this.conversionsCollection(workspaceId), id);
   }
 
-  private lotDoc(id: string) {
-    return doc(this.lotsCollection(), id);
+  private lotsCollection(workspaceId: string) {
+    return collection(this.workspaceDoc(workspaceId), "lots");
   }
 
-  private movementsCollection() {
-    return collection(this.workspaceDoc(), "inventoryMovements");
+  private lotDoc(workspaceId: string, id: string) {
+    return doc(this.lotsCollection(workspaceId), id);
   }
 
-  private movementDoc(id: string) {
-    return doc(this.movementsCollection(), id);
+  private movementsCollection(workspaceId: string) {
+    return collection(this.workspaceDoc(workspaceId), "inventoryMovements");
   }
 
-  private settingsCollection() {
-    return collection(this.workspaceDoc(), "settings");
+  private movementDoc(workspaceId: string, id: string) {
+    return doc(this.movementsCollection(workspaceId), id);
   }
 
-  private settingsDoc(id: string) {
-    return doc(this.settingsCollection(), id);
+  private settingsCollection(workspaceId: string) {
+    return collection(this.workspaceDoc(workspaceId), "settings");
   }
 
-  private alertDeliveriesCollection() {
-    return collection(this.workspaceDoc(), "notificationDeliveries");
+  private settingsDoc(workspaceId: string, id: string) {
+    return doc(this.settingsCollection(workspaceId), id);
   }
 
-  private alertDeliveryDoc(id: string) {
-    return doc(this.alertDeliveriesCollection(), id);
+  private alertDeliveriesCollection(workspaceId: string) {
+    return collection(this.workspaceDoc(workspaceId), "notificationDeliveries");
+  }
+
+  private alertDeliveryDoc(workspaceId: string, id: string) {
+    return doc(this.alertDeliveriesCollection(workspaceId), id);
   }
 }
 

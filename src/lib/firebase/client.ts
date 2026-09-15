@@ -12,7 +12,7 @@ import { getFirebasePublicConfig } from "@/lib/firebase/config";
 
 let appInstance: FirebaseApp | null = null;
 let firestoreInstance: Firestore | null = null;
-let authPromise: Promise<void> | null = null;
+let authPromise: Promise<string> | null = null;
 
 export function getFirebaseApp() {
   const config = getFirebasePublicConfig();
@@ -59,16 +59,18 @@ export function ensureFirebaseAnonymousAuth() {
   const app = getFirebaseApp();
 
   if (!app) {
-    return Promise.resolve();
+    return Promise.resolve("");
   }
 
   const auth = getAuth(app);
 
   if (auth.currentUser) {
-    return Promise.resolve();
+    return Promise.resolve(auth.currentUser.uid);
   }
 
-  authPromise ??= signInAnonymously(auth).then(() => undefined);
+  authPromise ??= signInAnonymously(auth).then(
+    (credential) => credential.user.uid
+  );
 
   return authPromise;
 }
