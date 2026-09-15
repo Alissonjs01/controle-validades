@@ -45,7 +45,9 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 
 - Priorize mobile-first, iPhone/iPad e safe areas.
 - Preserve o visual minimalista, suave, contemporâneo e inspirado em iOS.
-- Use glassmorphism com moderação e contraste suficiente.
+- Preserve a identidade de vidro óptico: transparência perceptível, reflexos discretos nas bordas e contraste suficiente. Os tokens de aparência ficam em `src/styles/glass.css`.
+- Temas claro/escuro são selecionáveis em `ThemeSwitcher`, persistidos por aparelho e aplicados antes da primeira pintura pelo bootstrap. Sem escolha salva, siga o sistema.
+- Preserve o fundo local `public/images/glass-calendar.webp` e os fallbacks para movimento/transparência reduzidos e ausência de backdrop-filter. Não adicione animações contínuas caras.
 - Preserve tokens de design antes de criar estilos pontuais.
 - Use Iconoir como biblioteca principal de ícones.
 - Não substitua silenciosamente Iconoir por Lucide, Heroicons, Font Awesome ou emojis permanentes.

@@ -19,6 +19,7 @@ import {
 
 import { AlertsSheet } from "@/features/inventory/notifications/AlertsSheet";
 import { Badge } from "@/components/ui/Badge";
+import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
 import { IconButton } from "@/components/ui/IconButton";
@@ -332,9 +333,9 @@ export function InventoryApp() {
   return (
     <main className="inventory-shell">
       <Container className="inventory-home">
+        <div className="brand-bar"><span className="brand-name"><span className="brand-mark" aria-hidden="true" />ValiddA</span><ThemeSwitcher /></div>
         <header className="inventory-topbar">
           <div>
-            <span className="eyebrow">Validades</span>
             <h1>Validades</h1>
             <p>
               {expiredCount > 0
@@ -891,7 +892,7 @@ function ManualLotSheet({
         <div className="sheet-handle" />
         <div className="sheet-heading">
           <div>
-            <span className="eyebrow">Fallback</span>
+            <span className="eyebrow">Cadastro manual</span>
             <h2 id="manual-lot-title">Novo lote</h2>
           </div>
           <IconButton aria-label="Fechar novo lote" onClick={onClose}>

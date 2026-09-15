@@ -205,12 +205,16 @@ A fundação inclui:
 
 ## Design system
 
-A base visual está em `src/styles/globals.css`:
+A estrutura visual está em `src/styles/globals.css`; materiais e tokens dos dois temas ficam em `src/styles/glass.css`:
 
 - Inter via `@fontsource-variable/inter`
 - tokens de cor, raio, sombra e glass
 - componentes base: `Button`, `IconButton`, `Input`, `Badge`, `GlassCard`, `Container`
 - estados discretos: normal, atenção, urgente, vencido e informação
+
+O seletor sol/lua salva o tema neste aparelho. Sem escolha salva, segue a aparência do sistema. Um script mínimo aplica a preferência antes da pintura para evitar flashes; a cor do navegador acompanha a seleção. `ThemeSwitcher` também acompanha mudanças entre abas.
+
+O fundo estático de calendário em vidro foi gerado para o app e otimizado para WebP (~55 KB), servido localmente e incluído no cache offline. Vidro usa preenchimento translúcido, refração aproximada por blur/saturação e reflexos de borda. Sheets têm maior proteção de contraste. Preferências de movimento/transparência reduzidos e falta de suporte a blur recebem fallback; não há vídeo, biblioteca gráfica ou animação contínua.
 
 Mantenha Iconoir como fonte principal de ícones. Não substitua silenciosamente por Lucide, Heroicons, Font Awesome ou similares.
 

@@ -1,5 +1,22 @@
 import { expect, type Page, test } from "@playwright/test";
 
+test("keeps both glass themes across reload and in dialogs", async ({ page }, testInfo) => {
+  for (const [theme, label] of [["light", "Tema claro"], ["dark", "Tema escuro"]] as const) {
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await page.reload();
+    await expect(page.getByRole("textbox", { name: "Nova movimentação" })).toBeVisible();
+    await expect(page.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe(theme);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`${theme}-home.png`), animations: "disabled" });
+    await page.getByRole("button", { name: "Novo lote manual" }).click();
+    await expect(page.getByRole("dialog", { name: "Novo lote" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`${theme}-sheet.png`), animations: "disabled" });
+    await page.getByRole("button", { name: "Fechar novo lote" }).click();
+  }
+});
+
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");

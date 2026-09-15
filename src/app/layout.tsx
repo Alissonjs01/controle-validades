@@ -1,9 +1,11 @@
 import "@fontsource-variable/inter";
 import "@/styles/globals.css";
+import "@/styles/glass.css";
 
 import type { Metadata, Viewport } from "next";
 
 import { PwaRegister } from "@/components/pwa/PwaRegister";
+import { themeBootstrap } from "@/components/theme/theme-bootstrap";
 
 const appName = "Controle de Validades";
 const appDescription =
@@ -37,12 +39,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: "cover",
-  themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#111513" },
-    { media: "(prefers-color-scheme: light)", color: "#f7f7f2" }
-  ],
+  themeColor: "#15191b",
   colorScheme: "dark light"
 };
 
@@ -52,8 +50,10 @@ type RootLayoutProps = Readonly<{
 
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="pt-BR">
+    <html lang="pt-BR" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: themeBootstrap }} /></head>
       <body>
+        <div className="app-wallpaper" aria-hidden="true" />
         <PwaRegister />
         {children}
       </body>

@@ -1,26 +1,3 @@
-:root {
-  --color-canvas: #0b1114;
-  --color-canvas-soft: #111a1e;
-  --color-ink: #f8f7ef;
-  --color-muted: #b5bbb4;
-  --color-line: rgba(227, 245, 238, 0.16);
-  --color-glass: rgba(18, 30, 33, 0.68);
-  --color-glass-strong: rgba(25, 39, 43, 0.92);
-  --color-field: rgba(255, 255, 255, 0.095);
-  --color-accent: #7fd8b2;
-  --color-accent-ink: #ffffff;
-  --color-normal: #8bd99d;
-  --color-attention: #e0b861;
-  --color-urgent: #ef7f7f;
-  --color-info: #8bbfe8;
-  --shadow-soft: 0 24px 80px rgba(0, 0, 0, 0.34);
-  --radius-sm: 12px;
-  --radius-md: 18px;
-  --radius-lg: 24px;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-}
-
 * {
   box-sizing: border-box;
 }
@@ -347,36 +324,6 @@ p {
   border-color: rgba(79, 127, 100, 0.2);
   background: rgba(79, 127, 100, 0.12);
   color: var(--color-normal);
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --color-canvas: #f7f7f2;
-    --color-canvas-soft: #eeeee7;
-    --color-ink: #171817;
-    --color-muted: #6e7168;
-    --color-line: rgba(45, 48, 43, 0.12);
-    --color-glass: rgba(255, 255, 255, 0.68);
-    --color-glass-strong: rgba(255, 255, 255, 0.86);
-    --color-field: rgba(255, 255, 255, 0.74);
-    --color-accent: #49695d;
-    --color-accent-ink: #ffffff;
-    --color-normal: #4f7f64;
-    --color-attention: #a2742d;
-    --color-urgent: #a54848;
-    --color-info: #566070;
-    --shadow-soft: 0 18px 55px rgba(42, 44, 38, 0.13);
-  }
-
-  body {
-    background:
-      radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.92), transparent 32rem),
-      linear-gradient(145deg, #f9f8f3 0%, #eeefe7 44%, #f6f3ed 100%);
-  }
-
-  .button--primary {
-    color: var(--color-accent-ink);
-  }
 }
 
 .badge--attention {
@@ -1007,13 +954,6 @@ p {
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@media (prefers-color-scheme: light) {
-  .lot-card {
-    background: rgba(255, 255, 255, 0.62);
-    box-shadow: 0 14px 42px rgba(42, 44, 38, 0.1);
   }
 }
 

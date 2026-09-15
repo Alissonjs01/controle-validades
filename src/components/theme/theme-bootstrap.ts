@@ -1,0 +1,2 @@
+// Runs before first paint. Values are a fixed allowlist, never user-generated markup.
+export const themeBootstrap = `(function(){var t;try{t=localStorage.getItem('validda-theme')}catch(e){}if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;var m=document.querySelector('meta[name="theme-color"]');if(m)m.content=t==='dark'?'#15191b':'#edf0ef';})();`;

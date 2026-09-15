@@ -9,5 +9,5 @@ export function IconButton({
   type = "button",
   ...props
 }: IconButtonProps) {
-  return <button className={cn("icon-button", className)} type={type} {...props} />;
+  return <button className={cn("icon-button", className)} title={props["aria-label"]} type={type} {...props} />;
 }

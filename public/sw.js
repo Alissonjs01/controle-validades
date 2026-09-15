@@ -1,4 +1,4 @@
-const CACHE_NAME = "controle-validades-push-v2";
+const CACHE_NAME = "controle-validades-glass-v3";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -6,7 +6,9 @@ const APP_SHELL = [
   "/icons/pwa-icon-192.png",
   "/icons/pwa-icon-512.png",
   "/icons/maskable-icon-512.png",
-  "/icons/apple-touch-icon.png"
+  "/icons/apple-touch-icon.png",
+  "/images/glass-calendar.webp",
+  "/icons/validda-mark.svg"
 ];
 
 self.addEventListener("install", (event) => {
@@ -26,6 +28,11 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+  if (url.origin === self.location.origin && ["/images/glass-calendar.webp", "/icons/validda-mark.svg"].includes(url.pathname)) {
+    event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+    return;
+  }
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request).catch(() => caches.match("/"))
