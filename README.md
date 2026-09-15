@@ -2,13 +2,13 @@
 
 PWA mobile-first para responder uma pergunta simples: **o que tenho, quanto tenho e o que está perto de vencer?**
 
-O projeto já possui fundação PWA, domínio/parser determinístico, interface principal de movimentações, OCR local de validade, alertas internos e adapter Supabase preparado. Ainda não implementa IA nem autenticação complexa.
+O projeto já possui fundação PWA, domínio/parser determinístico, interface principal de movimentações, OCR local de validade, alertas internos e adapter Firebase/Firestore preparado. Ainda não implementa IA nem login complexo.
 
 ## Stack
 
 - Next.js com App Router
 - React + TypeScript strict
-- Supabase JS SDK preparado, sem depender de credenciais reais
+- Firebase Web SDK com Firestore preparado, sem depender de credenciais reais
 - Iconoir como biblioteca principal de ícones
 - Tesseract.js carregado sob demanda para OCR no navegador
 - CSS moderno com tokens próprios de design
@@ -31,8 +31,8 @@ public/
   sw.js            Service worker mínimo
 e2e/               Testes E2E dos fluxos principais
 scripts/           Automação local de validação, incluindo runner E2E
-supabase/
-  migrations/      Schema SQL versionado
+firestore.rules    Regras de acesso do Firestore
+firebase.json      Configuração do Firebase CLI
 ```
 
 O domínio foi mantido pequeno de propósito. Ele cobre `products`, `product_aliases`, `packaging_conversions`, `packaging_aliases`, `lots`, `inventory_movements` e `vocabulary_terms` sem adicionar módulos de ERP.
@@ -62,7 +62,7 @@ A UI atual cobre:
 - alertas internos e preferências de aviso;
 - toasts e mensagens amigáveis de erro.
 
-Sem Supabase real, a interface usa o adapter local em `src/features/inventory/app/local-inventory-store.ts`, persistindo dados de desenvolvimento no `localStorage`. A UI consome esse contrato para permitir troca futura por um repositório Supabase sem misturar parsing, execução e componentes.
+Sem Firebase real, a interface usa o adapter local em `src/features/inventory/app/local-inventory-store.ts`, persistindo dados de desenvolvimento no `localStorage`. Quando as variáveis públicas do Firebase existem, o app usa o repositório Firestore em `src/features/inventory/repositories/firestore-inventory-repository.ts`.
 
 ## Câmera e OCR
 
@@ -123,7 +123,7 @@ Para adicionar expressão operacional, edite `operationalVocabulary` em `src/fea
 
 ## Datas
 
-Validade é tratada como data civil (`DATE` no banco), não como instante UTC. Isso evita que `10/10` vire `09/10` por conversão de timezone.
+Validade é tratada como data civil em string ISO (`YYYY-MM-DD`) no banco, não como instante UTC. Isso evita que `10/10` vire `09/10` por conversão de timezone.
 
 Anos abreviados são expandidos por regra central em `expandTwoDigitExpirationYear`: `27` vira `2027`. A regra está testada e deve permanecer explícita.
 
@@ -156,44 +156,44 @@ npm run check
 
 ## Variáveis de ambiente
 
-Copie `.env.example` para um arquivo local não versionado quando houver um projeto Supabase real.
+Copie `.env.example` para um arquivo local não versionado quando houver um projeto Firebase real.
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+NEXT_PUBLIC_FIREBASE_API_KEY=
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
+NEXT_PUBLIC_FIREBASE_APP_ID=
 ```
 
-Use apenas chave pública/publicável no frontend. Nunca exponha `service_role` ou tokens administrativos no browser.
+Essas chaves Web do Firebase são públicas por natureza. A proteção real fica em `firestore.rules`. Nunca coloque conta de serviço, tokens administrativos ou secrets privados no frontend.
 
-## Supabase
+## Firebase / Firestore
 
-A integração está preparada em `src/lib/supabase`. Sem variáveis públicas, o app continua buildando e a função de cliente retorna `null`.
+A integração está preparada em `src/lib/firebase`. Sem variáveis públicas, o app continua buildando e usa `localStorage`.
 
-Os schemas versionados ficam em `supabase/migrations`.
-
-Ele cria:
+O banco oficial do projeto é Firestore. A estrutura atual usa o workspace simples `inventory/default` e subcoleções:
 
 - `products`
-- `product_aliases`
-- `packaging_conversions`
-- `packaging_aliases`
+- `packagingConversions`
 - `lots`
-- `inventory_movements`
-- `vocabulary_terms`
+- `inventoryMovements`
+- `settings`
+- `notificationDeliveries`
 
-Também inclui constraints de integridade, índices para aliases/FEFO/histórico e a função `inventory_apply_lot_movement` para atualização atômica futura de lote + movimento.
+Entrada cria lote e movimento juntos. Saída, zeramento e ajuste usam `runTransaction` para ler o lote, aplicar a regra de domínio e gravar lote + histórico de forma consistente.
 
-A migration final adiciona:
+As regras ficam em `firestore.rules` e exigem usuário autenticado. O app usa Firebase Auth anônimo para não deixar o banco aberto enquanto evitamos uma tela de login nesta fase. No Console do Firebase, habilite:
 
-- `notification_preferences`
-- `notification_deliveries`
-- RPC `inventory_create_entry_lot`
-- RPC `inventory_adjust_lot`
-- RLS habilitado com políticas para usuários autenticados
+- Firestore Database
+- Authentication -> Anonymous
 
-Sem credenciais reais, o app continua operando com adapter local. Com Supabase real, aplique migrations, gere tipos oficiais e conecte a UI ao repositório em `src/features/inventory/repositories/supabase-inventory-repository.ts`.
+Depois publique regras/índices com Firebase CLI quando estiver logado:
 
-Quando houver um projeto Supabase real, gere os tipos oficiais e compare com `src/types/database.ts`.
+```bash
+firebase deploy --only firestore
+```
 
 ## PWA
 
@@ -235,7 +235,8 @@ Para adicionar novo tipo de embalagem, crie conversão no produto, aliases corre
 
 ## Próximos passos
 
-1. Conectar projeto Supabase real e aplicar migrations quando houver credenciais/autenticação.
-2. Gerar tipos oficiais do Supabase.
-3. Decidir modelo de autenticação antes de usar RLS em produção multiusuário.
-4. Evoluir push/background se houver backend de notificações.
+1. Criar/conectar projeto Firebase real e colar as variáveis públicas no Netlify.
+2. Habilitar Firestore e Authentication Anonymous no Firebase Console.
+3. Publicar `firestore.rules` e `firestore.indexes.json`.
+4. Decidir se o app continuará pessoal/anônimo ou se terá login Google/e-mail para sincronização segura por usuário.
+5. Evoluir push/background se houver backend de notificações.

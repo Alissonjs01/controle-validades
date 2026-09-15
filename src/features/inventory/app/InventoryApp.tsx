@@ -33,6 +33,7 @@ import {
   updateAlertPreferences,
   type InventoryStoreState
 } from "@/features/inventory/app/local-inventory-store";
+import { createFirestoreInventoryRepository } from "@/features/inventory/repositories/firestore-inventory-repository";
 import { parseBrazilianCivilDate } from "@/features/inventory/domain/dates";
 import {
   formatCivilDate,
@@ -120,6 +121,10 @@ const getOnlineSnapshot = () =>
 const getServerOnlineSnapshot = () => true;
 
 export function InventoryApp() {
+  const firestoreRepository = useMemo(
+    () => createFirestoreInventoryRepository(),
+    []
+  );
   const [state, setState] = useState<InventoryStoreState>(() =>
     loadInventoryState()
   );
@@ -135,6 +140,7 @@ export function InventoryApp() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isOcrOpen, setIsOcrOpen] = useState(false);
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
+  const [isCloudLoading, setIsCloudLoading] = useState(Boolean(firestoreRepository));
   const isHydrated = useSyncExternalStore(
     subscribeToHydration,
     getHydratedSnapshot,
@@ -151,6 +157,41 @@ export function InventoryApp() {
   useEffect(() => {
     saveInventoryState(state);
   }, [state]);
+
+  useEffect(() => {
+    if (!firestoreRepository) {
+      return;
+    }
+
+    let isCurrent = true;
+
+    void firestoreRepository
+      .getState()
+      .then((firestoreState) => {
+        if (!isCurrent) {
+          return;
+        }
+
+        setState(firestoreState);
+        setToast("Firebase conectado");
+      })
+      .catch(() => {
+        if (!isCurrent) {
+          return;
+        }
+
+        setToast("Não foi possível conectar ao Firebase. Usando modo local.");
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setIsCloudLoading(false);
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [firestoreRepository]);
 
   useEffect(() => {
     if (!toast) {
@@ -209,14 +250,20 @@ export function InventoryApp() {
         return;
       }
 
+      const deliveries = createAlertDeliveries(
+        deliveredAlerts,
+        new Date().toISOString()
+      );
+
+      if (firestoreRepository) {
+        void firestoreRepository.recordAlertDeliveries(deliveries);
+      }
+
       setState((current) =>
-        recordAlertDeliveries(
-          current,
-          createAlertDeliveries(deliveredAlerts, new Date().toISOString())
-        )
+        recordAlertDeliveries(current, deliveries)
       );
     });
-  }, [dueBrowserAlerts]);
+  }, [dueBrowserAlerts, firestoreRepository]);
 
   function submitCommand(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -235,7 +282,7 @@ export function InventoryApp() {
     });
   }
 
-  function confirmCommand(command: ParsedCommand, overrideLotId: LotId | null) {
+  async function confirmCommand(command: ParsedCommand, overrideLotId: LotId | null) {
     const lot = overrideLotId
       ? state.lots.find((item) => item.id === overrideLotId) ?? null
       : command.lot;
@@ -247,15 +294,21 @@ export function InventoryApp() {
           return;
         }
 
-        setState((current) =>
-          addEntryLot(current, {
-            productId: command.product!.id,
-            expirationDate: command.expirationDate!,
-            baseQuantity: command.baseQuantity!,
-            sourceText: command.originalText,
-            metadata: commandMetadata(command)
-          })
-        );
+        const input = {
+          productId: command.product.id,
+          expirationDate: command.expirationDate,
+          baseQuantity: command.baseQuantity,
+          sourceText: command.originalText,
+          metadata: commandMetadata(command)
+        };
+
+        if (firestoreRepository) {
+          const mutation = await firestoreRepository.createEntryLot(input);
+          setState((current) => appendRepositoryMutation(current, mutation));
+        } else {
+          setState((current) => addEntryLot(current, input));
+        }
+
         finishCommand("Entrada registrada");
         return;
       }
@@ -266,16 +319,22 @@ export function InventoryApp() {
           return;
         }
 
-        setState((current) =>
-          applyInventoryMovement(current, {
-            type: "EXIT",
-            productId: command.product!.id,
-            lotId: lot.id,
-            baseQuantity: command.baseQuantity!,
-            sourceText: command.originalText,
-            metadata: commandMetadata(command)
-          })
-        );
+        const input = {
+          type: "EXIT" as const,
+          productId: command.product.id,
+          lotId: lot.id,
+          baseQuantity: command.baseQuantity,
+          sourceText: command.originalText,
+          metadata: commandMetadata(command)
+        };
+
+        if (firestoreRepository) {
+          const mutation = await firestoreRepository.applyMovement(input);
+          setState((current) => appendRepositoryMutation(current, mutation));
+        } else {
+          setState((current) => applyInventoryMovement(current, input));
+        }
+
         finishCommand(`${command.baseQuantity} unidades baixadas`);
         return;
       }
@@ -286,16 +345,22 @@ export function InventoryApp() {
           return;
         }
 
-        setState((current) =>
-          applyInventoryMovement(current, {
-            type: "ZERO",
-            productId: command.product!.id,
-            lotId: lot.id,
-            baseQuantity: 0,
-            sourceText: command.originalText,
-            metadata: commandMetadata(command)
-          })
-        );
+        const input = {
+          type: "ZERO" as const,
+          productId: command.product.id,
+          lotId: lot.id,
+          baseQuantity: 0,
+          sourceText: command.originalText,
+          metadata: commandMetadata(command)
+        };
+
+        if (firestoreRepository) {
+          const mutation = await firestoreRepository.applyMovement(input);
+          setState((current) => appendRepositoryMutation(current, mutation));
+        } else {
+          setState((current) => applyInventoryMovement(current, input));
+        }
+
         finishCommand("Lote zerado");
       }
     } catch (error) {
@@ -367,6 +432,13 @@ export function InventoryApp() {
           </div>
         ) : null}
 
+        {isCloudLoading ? (
+          <div className="offline-strip" role="status">
+            <CloudDesync aria-hidden="true" />
+            <span>Conectando ao Firebase...</span>
+          </div>
+        ) : null}
+
         {internalAlertLots.length > 0 ? (
           <button
             className="attention-strip"
@@ -418,7 +490,9 @@ export function InventoryApp() {
         <MovementConfirmation
           catalog={state}
           onCancel={() => setPendingCommand(null)}
-          onConfirm={confirmCommand}
+          onConfirm={(command, overrideLotId) => {
+            void confirmCommand(command, overrideLotId);
+          }}
           onSelectLot={(lotId) =>
             setPendingCommand((current) =>
               current ? { ...current, selectedLotId: lotId } : current
@@ -442,31 +516,49 @@ export function InventoryApp() {
           movements={state.movements}
           onClose={() => setSelectedLotId(null)}
           onSave={(input) => {
-            try {
-              setState((current) => editLot(current, input));
-              setToast("Lote atualizado");
-              setSelectedLotId(null);
-            } catch (error) {
-              setToast(toFriendlyError(error));
-            }
+            void (async () => {
+              try {
+                if (firestoreRepository) {
+                  const mutation = await firestoreRepository.editLot(input);
+                  setState((current) =>
+                    appendRepositoryMutation(current, mutation)
+                  );
+                } else {
+                  setState((current) => editLot(current, input));
+                }
+                setToast("Lote atualizado");
+                setSelectedLotId(null);
+              } catch (error) {
+                setToast(toFriendlyError(error));
+              }
+            })();
           }}
           onZero={(lot) => {
-            try {
-              setState((current) =>
-                applyInventoryMovement(current, {
-                  type: "ZERO",
+            void (async () => {
+              try {
+                const input = {
+                  type: "ZERO" as const,
                   productId: lot.productId,
                   lotId: lot.id,
                   baseQuantity: 0,
                   sourceText: "Zeramento manual",
                   metadata: { source: "lot-details" }
-                })
-              );
-              setToast("Lote zerado");
-              setSelectedLotId(null);
-            } catch (error) {
-              setToast(toFriendlyError(error));
-            }
+                };
+
+                if (firestoreRepository) {
+                  const mutation = await firestoreRepository.applyMovement(input);
+                  setState((current) =>
+                    appendRepositoryMutation(current, mutation)
+                  );
+                } else {
+                  setState((current) => applyInventoryMovement(current, input));
+                }
+                setToast("Lote zerado");
+                setSelectedLotId(null);
+              } catch (error) {
+                setToast(toFriendlyError(error));
+              }
+            })();
           }}
           products={state.products}
           referenceDate={referenceDate}
@@ -481,14 +573,43 @@ export function InventoryApp() {
             setManualInitialExpirationDate(null);
           }}
           onSave={(input) => {
-            try {
-              setState((current) => addManualLot(current, input));
-              setIsManualOpen(false);
-              setManualInitialExpirationDate(null);
-              setToast("Entrada registrada");
-            } catch (error) {
-              setToast(toFriendlyError(error));
-            }
+            void (async () => {
+              try {
+                if (firestoreRepository) {
+                  const conversion = state.packagingConversions.find(
+                    (item) =>
+                      item.id === input.conversionId &&
+                      item.productId === input.productId
+                  );
+
+                  if (!conversion) {
+                    throw new Error("Conversão de embalagem não encontrada.");
+                  }
+
+                  const mutation = await firestoreRepository.createEntryLot({
+                    productId: input.productId,
+                    expirationDate: input.expirationDate,
+                    baseQuantity: input.enteredQuantity * conversion.multiplier,
+                    sourceText: input.sourceText ?? "Cadastro manual",
+                    metadata: {
+                      enteredQuantity: input.enteredQuantity,
+                      packaging: conversion.packagingType,
+                      multiplier: conversion.multiplier
+                    }
+                  });
+                  setState((current) =>
+                    appendRepositoryMutation(current, mutation)
+                  );
+                } else {
+                  setState((current) => addManualLot(current, input));
+                }
+                setIsManualOpen(false);
+                setManualInitialExpirationDate(null);
+                setToast("Entrada registrada");
+              } catch (error) {
+                setToast(toFriendlyError(error));
+              }
+            })();
           }}
           state={state}
         />
@@ -513,8 +634,16 @@ export function InventoryApp() {
           alerts={dueBrowserAlerts}
           onClose={() => setIsAlertsOpen(false)}
           onSavePreferences={(preferences) => {
-            setState((current) => updateAlertPreferences(current, preferences));
-            setToast(preferences.enabled ? "Avisos atualizados" : "Avisos pausados");
+            void (async () => {
+              if (firestoreRepository) {
+                await firestoreRepository.updateAlertPreferences(preferences);
+              }
+
+              setState((current) => updateAlertPreferences(current, preferences));
+              setToast(
+                preferences.enabled ? "Avisos atualizados" : "Avisos pausados"
+              );
+            })();
           }}
           preferences={state.alertPreferences}
           products={state.products}
@@ -1580,6 +1709,21 @@ function filterLots(
 
     return true;
   });
+}
+
+function appendRepositoryMutation(
+  state: InventoryStoreState,
+  mutation: Readonly<{ lot: Lot; movement: InventoryMovement }>
+): InventoryStoreState {
+  const hasLot = state.lots.some((lot) => lot.id === mutation.lot.id);
+
+  return {
+    ...state,
+    lots: hasLot
+      ? state.lots.map((lot) => (lot.id === mutation.lot.id ? mutation.lot : lot))
+      : [...state.lots, mutation.lot],
+    movements: [mutation.movement, ...state.movements]
+  };
 }
 
 function filterCount(

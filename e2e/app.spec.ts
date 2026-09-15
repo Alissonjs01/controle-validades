@@ -26,6 +26,7 @@ test("opens the mobile app and filters active lots", async ({ page }) => {
   await expect(page.getByText("Usar primeiro")).toBeVisible();
 
   await page.getByRole("button", { name: /Até 30 dias/u }).click();
+  await page.getByRole("button", { name: /Todos/u }).click();
 
   await expect(page.getByText("Coca-Cola 2L").first()).toBeVisible();
   await expect(page.getByText("Água Mineral 500ml")).toBeVisible();

@@ -26,18 +26,19 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
   `features`, `lib`, `styles` e `types`.
 - Evite abstrações prematuras e pastas vazias.
 - Evite dependências novas quando a plataforma ou o código local resolvem bem.
-- Para alterações futuras de banco, use migrations.
+- Para alterações futuras de banco, atualize `firestore.rules`, `firestore.indexes.json` e a documentação quando necessário.
 - Preserve a separação: texto -> parser -> intenção -> confirmação -> execução.
 - Parsing nunca deve alterar estoque ou banco.
 - A UI nunca deve alterar estoque sem confirmação explícita, mesmo quando o parser retorna `READY`.
-- A interface principal consome `src/features/inventory/app/local-inventory-store.ts` enquanto não houver Supabase real; preserve o contrato ao criar adapters reais.
+- A interface principal consome `src/features/inventory/app/local-inventory-store.ts` enquanto não houver Firebase real; preserve o contrato ao evoluir adapters reais.
 - Conversões de embalagem pertencem ao produto. Nunca assuma multiplicadores globais.
 - Validades são datas civis (`DATE`), não instantes UTC.
 - FEFO deve sugerir lote sem esconder ambiguidade da UI.
 - Regras de FEFO, conversão, quantidade e validade pertencem ao domínio/parser, não aos componentes React.
 - OCR deve reutilizar `src/features/inventory/domain/dates.ts` e `src/features/inventory/ocr/expiration-date-extraction.ts`.
 - Alertas devem usar `src/features/inventory/notifications/alerts.ts` e registrar marcos emitidos para evitar spam.
-- Supabase real deve usar migrations e RPCs transacionais; não faça atualização ingênua de estoque no frontend.
+- Firebase real deve usar Firestore com transações para saída/zeramento/ajuste; não faça atualização ingênua de estoque no frontend.
+- Regras do Firestore ficam em `firestore.rules`; índices ficam em `firestore.indexes.json`.
 
 ## Design system
 
@@ -59,7 +60,7 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - Mantenha `.env*` sensível fora do Git.
 - `.env.example` deve conter apenas nomes e valores fictícios.
 - Fotos usadas no OCR não devem ser persistidas nem enviadas para APIs externas sem consentimento e documentação explícitos.
-- Não habilite banco de produção aberto; preserve RLS/policies e documente pendências de autenticação.
+- Não habilite banco de produção aberto; preserve regras do Firestore e documente pendências de autenticação.
 
 ## Qualidade obrigatória
 
@@ -88,7 +89,7 @@ configuração ou comandos mudarem.
 ## Interface e fluxos
 
 - A tela principal fica em `src/features/inventory/app/InventoryApp.tsx`.
-- O adapter local persiste dados de desenvolvimento no `localStorage`; não dependa de Supabase para build/test.
+- O adapter local persiste dados de desenvolvimento no `localStorage`; não dependa de Firebase para build/test.
 - Entrada, saída, zeramento e ajuste manual devem registrar `inventory_movements`.
 - Ambiguidades de produto/lote devem ser resolvidas visualmente antes da confirmação.
 - Testes de fluxo ficam em `src/features/inventory/app/InventoryApp.test.tsx` e `e2e/app.spec.ts`.
