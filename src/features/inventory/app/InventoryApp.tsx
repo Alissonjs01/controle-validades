@@ -167,15 +167,35 @@ export function InventoryApp() {
     }
 
     let isCurrent = true;
+    let unsubscribe: (() => void) | null = null;
 
     void firestoreRepository
-      .getState()
-      .then((firestoreState) => {
+      .subscribeState(
+        (firestoreState) => {
+          if (!isCurrent) {
+            return;
+          }
+
+          setState(firestoreState);
+          setIsCloudLoading(false);
+        },
+        () => {
+          if (!isCurrent) {
+            return;
+          }
+
+          setFirestoreRepository(null);
+          setToast("Não foi possível sincronizar com Firebase. Usando modo local.");
+          setIsCloudLoading(false);
+        }
+      )
+      .then((stopListening) => {
         if (!isCurrent) {
+          stopListening();
           return;
         }
 
-        setState(firestoreState);
+        unsubscribe = stopListening;
         setToast("Firebase conectado");
       })
       .catch(() => {
@@ -185,15 +205,12 @@ export function InventoryApp() {
 
         setFirestoreRepository(null);
         setToast("Não foi possível conectar ao Firebase. Usando modo local.");
-      })
-      .finally(() => {
-        if (isCurrent) {
-          setIsCloudLoading(false);
-        }
+        setIsCloudLoading(false);
       });
 
     return () => {
       isCurrent = false;
+      unsubscribe?.();
     };
   }, [firestoreRepository]);
 

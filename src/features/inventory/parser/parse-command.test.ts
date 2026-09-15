@@ -122,6 +122,42 @@ describe("parseInventoryCommand conversions", () => {
     expect(command.conversion?.multiplier).toBe(12);
     expect(command.baseQuantity).toBe(240);
   });
+
+  it("uses fardo with six units for Fanta 2L flavors", () => {
+    const command = parse("Chegou 2 fardos de Fanta Guaraná 2 L vence 10/10/2027");
+
+    expect(command.status).toBe("READY");
+    expect(command.product?.name).toBe("Fanta Guaraná 2L");
+    expect(command.conversion?.multiplier).toBe(6);
+    expect(command.baseQuantity).toBe(12);
+  });
+
+  it("uses fardo with twelve units for soda cans", () => {
+    const command = parse("Chegou 2 fardos de Fanta Uva Lata vence 10/10/2027");
+
+    expect(command.status).toBe("READY");
+    expect(command.product?.name).toBe("Fanta Uva Lata");
+    expect(command.conversion?.multiplier).toBe(12);
+    expect(command.baseQuantity).toBe(24);
+  });
+
+  it("recognizes Sprite Zero can even with common typo", () => {
+    const command = parse("Chegou 1 fardo de Split Zero Lata vence 10/10/2027");
+
+    expect(command.status).toBe("READY");
+    expect(command.product?.name).toBe("Sprite Zero Lata");
+    expect(command.conversion?.multiplier).toBe(12);
+    expect(command.baseQuantity).toBe(12);
+  });
+
+  it("uses fardo with twelve units for water 600ml", () => {
+    const command = parse("Chegou 1 fardo de Água 600ml vence 10/10/2027");
+
+    expect(command.status).toBe("READY");
+    expect(command.product?.name).toBe("Água Mineral 600ml");
+    expect(command.conversion?.multiplier).toBe(12);
+    expect(command.baseQuantity).toBe(12);
+  });
 });
 
 describe("parseInventoryCommand ambiguity and invalid cases", () => {
@@ -139,6 +175,16 @@ describe("parseInventoryCommand ambiguity and invalid cases", () => {
 
     expect(command.status).toBe("AMBIGUOUS");
     expect(command.productCandidates).toHaveLength(2);
+  });
+
+  it("does not silently choose between Fanta 2L and can when format is missing", () => {
+    const command = parse("Chegou 2 fardos de Fanta Laranja vence 10/10/2027");
+
+    expect(command.status).toBe("AMBIGUOUS");
+    expect(command.productCandidates.map((product) => product.name)).toEqual([
+      "Fanta Laranja 2L",
+      "Fanta Laranja Lata"
+    ]);
   });
 
   it("returns invalid when a known packaging lacks product conversion", () => {

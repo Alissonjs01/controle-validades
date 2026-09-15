@@ -2,13 +2,15 @@ import {
   collection,
   doc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
   runTransaction,
   setDoc,
   writeBatch,
   type DocumentData,
-  type Firestore
+  type Firestore,
+  type Unsubscribe
 } from "firebase/firestore";
 
 import { applyConfirmedMovement } from "@/features/inventory/domain/movements";
@@ -37,6 +39,10 @@ import type {
 } from "@/types/inventory";
 
 const WORKSPACE_COLLECTION = "inventory";
+const SHARED_WORKSPACE_ID = "shared";
+
+type InventoryStateListener = (state: InventoryStoreState) => void;
+type RepositoryErrorListener = (error: Error) => void;
 
 export class FirestoreInventoryRepository {
   constructor(private readonly db: Firestore) {}
@@ -47,13 +53,109 @@ export class FirestoreInventoryRepository {
     const state = await this.readState(workspaceId);
 
     if (state.products.length > 0) {
-      return state;
+      return this.syncBaselineCatalog(workspaceId, state);
     }
 
     const initialState = createInitialInventoryState();
     await this.seedInitialState(workspaceId, initialState);
 
     return initialState;
+  }
+
+  async subscribeState(
+    onChange: InventoryStateListener,
+    onError: RepositoryErrorListener
+  ): Promise<Unsubscribe> {
+    const workspaceId = await this.getWorkspaceId();
+    let current = await this.getState();
+
+    onChange(current);
+
+    const emit = () => onChange(current);
+    const handleError = (error: Error) => onError(error);
+    const unsubscribers = [
+      onSnapshot(
+        this.productsCollection(workspaceId),
+        (snapshot) => {
+          current = {
+            ...current,
+            products: snapshot.docs.map((item) => item.data() as Product)
+          };
+          emit();
+        },
+        handleError
+      ),
+      onSnapshot(
+        this.conversionsCollection(workspaceId),
+        (snapshot) => {
+          current = {
+            ...current,
+            packagingConversions: snapshot.docs.map(
+              (item) => item.data() as PackagingConversion
+            )
+          };
+          emit();
+        },
+        handleError
+      ),
+      onSnapshot(
+        query(this.lotsCollection(workspaceId), orderBy("expirationDate", "asc")),
+        (snapshot) => {
+          current = {
+            ...current,
+            lots: snapshot.docs.map((item) => item.data() as Lot)
+          };
+          emit();
+        },
+        handleError
+      ),
+      onSnapshot(
+        query(this.movementsCollection(workspaceId), orderBy("occurredAt", "desc")),
+        (snapshot) => {
+          current = {
+            ...current,
+            movements: snapshot.docs.map(
+              (item) => item.data() as InventoryMovement
+            )
+          };
+          emit();
+        },
+        handleError
+      ),
+      onSnapshot(
+        this.settingsCollection(workspaceId),
+        (snapshot) => {
+          const settings = snapshot.docs.find((item) => item.id === "alerts");
+          current = {
+            ...current,
+            alertPreferences: settings
+              ? (settings.data() as AlertPreferences)
+              : defaultAlertPreferences
+          };
+          emit();
+        },
+        handleError
+      ),
+      onSnapshot(
+        this.alertDeliveriesCollection(workspaceId),
+        (snapshot) => {
+          current = {
+            ...current,
+            alertDeliveries: snapshot.docs.map(
+              (item) => item.data() as AlertDeliveryRecord
+            )
+          };
+          emit();
+        },
+        handleError
+      )
+    ];
+
+    return () => {
+      for (const unsubscribe of unsubscribers) {
+        unsubscribe();
+      }
+    };
   }
 
   async createEntryLot(input: EntryIntentInput) {
@@ -266,14 +368,48 @@ export class FirestoreInventoryRepository {
     await batch.commit();
   }
 
-  private async getWorkspaceId() {
-    const uid = await ensureFirebaseAnonymousAuth();
+  private async syncBaselineCatalog(
+    workspaceId: string,
+    state: InventoryStoreState
+  ): Promise<InventoryStoreState> {
+    const baseline = createInitialInventoryState();
+    const shouldWriteProducts = hasBaselineChanges(
+      state.products,
+      baseline.products
+    );
+    const shouldWriteConversions = hasBaselineChanges(
+      state.packagingConversions,
+      baseline.packagingConversions
+    );
 
-    if (!uid) {
-      throw new Error("Firebase não está autenticado.");
+    if (shouldWriteProducts || shouldWriteConversions) {
+      const batch = writeBatch(this.db);
+
+      for (const product of baseline.products) {
+        batch.set(this.productDoc(workspaceId, product.id), product);
+      }
+
+      for (const conversion of baseline.packagingConversions) {
+        batch.set(this.conversionDoc(workspaceId, conversion.id), conversion);
+      }
+
+      await batch.commit();
     }
 
-    return uid;
+    return {
+      ...state,
+      products: mergeBaselineItems(baseline.products, state.products),
+      packagingConversions: mergeBaselineItems(
+        baseline.packagingConversions,
+        state.packagingConversions
+      )
+    };
+  }
+
+  private async getWorkspaceId() {
+    await ensureFirebaseAnonymousAuth();
+
+    return SHARED_WORKSPACE_ID;
   }
 
   private workspaceDoc(workspaceId: string) {
@@ -369,6 +505,29 @@ function createId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random()
     .toString(36)
     .slice(2)}`;
+}
+
+function hasBaselineChanges<T extends { id: string }>(
+  current: readonly T[],
+  baseline: readonly T[]
+) {
+  const currentById = new Map(current.map((item) => [item.id, item]));
+
+  return baseline.some((item) => {
+    const currentItem = currentById.get(item.id);
+
+    return !currentItem || JSON.stringify(currentItem) !== JSON.stringify(item);
+  });
+}
+
+function mergeBaselineItems<T extends { id: string }>(
+  baseline: readonly T[],
+  current: readonly T[]
+) {
+  const baselineIds = new Set(baseline.map((item) => item.id));
+  const currentExtras = current.filter((item) => !baselineIds.has(item.id));
+
+  return [...baseline, ...currentExtras];
 }
 
 export type FirestoreDocument = DocumentData;

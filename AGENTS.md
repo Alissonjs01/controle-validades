@@ -31,6 +31,9 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - Parsing nunca deve alterar estoque ou banco.
 - A UI nunca deve alterar estoque sem confirmação explícita, mesmo quando o parser retorna `READY`.
 - A interface principal consome `src/features/inventory/app/local-inventory-store.ts` enquanto não houver Firebase real; preserve o contrato ao evoluir adapters reais.
+- Com Firebase real, o app usa o workspace compartilhado `inventory/shared` para que várias pessoas vejam o mesmo estoque em tempo real.
+- Preserve snapshots realtime no adapter Firestore; a UI deve refletir alterações feitas em outro dispositivo sem recarregar.
+- O workspace compartilhado com Auth anônimo é uma solução simples para operação interna; se houver exigência de acesso restrito, implemente login real e regras por usuário/equipe.
 - Conversões de embalagem pertencem ao produto. Nunca assuma multiplicadores globais.
 - Validades são datas civis (`DATE`), não instantes UTC.
 - FEFO deve sugerir lote sem esconder ambiguidade da UI.
@@ -39,6 +42,7 @@ O app deve continuar pequeno e direto. Não transforme este projeto em ERP.
 - Alertas devem usar `src/features/inventory/notifications/alerts.ts` e registrar marcos emitidos para evitar spam.
 - Firebase real deve usar Firestore com transações para saída/zeramento/ajuste; não faça atualização ingênua de estoque no frontend.
 - Regras do Firestore ficam em `firestore.rules`; índices ficam em `firestore.indexes.json`.
+- Catálogo/base inicial fica em `src/features/inventory/fixtures/dev-catalog.ts`; ao adicionar produtos fixos do negócio, mantenha aliases e conversões testados.
 
 ## Design system
 
@@ -84,6 +88,7 @@ configuração ou comandos mudarem.
 - Datas ficam em `src/features/inventory/domain/dates.ts`; anos abreviados usam regra central.
 - Produto, embalagem ou lote ambíguo deve retornar `AMBIGUOUS` ou `NEEDS_CONFIRMATION`.
 - Para novas expressões, aliases ou embalagens, atualize testes reais em `src/features/inventory`.
+- Evite aliases soltos perigosos: se um termo pode apontar para 2L e lata, retorne ambiguidade ou exija o formato.
 - Para novas variações de OCR de validade, atualize testes em `src/features/inventory/ocr`.
 
 ## Interface e fluxos

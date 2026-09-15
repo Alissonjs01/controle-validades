@@ -29,7 +29,7 @@ test("opens the mobile app and filters active lots", async ({ page }) => {
   await page.getByRole("button", { name: /Todos/u }).click();
 
   await expect(page.getByText("Coca-Cola 2L").first()).toBeVisible();
-  await expect(page.getByText("Água Mineral 500ml")).toBeVisible();
+  await expect(page.getByText("Água Mineral 600ml")).toBeVisible();
 
   const manifest = await page.request.get("/manifest.webmanifest");
   expect(manifest.ok()).toBe(true);

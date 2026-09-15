@@ -2,13 +2,13 @@
 
 PWA mobile-first para responder uma pergunta simples: **o que tenho, quanto tenho e o que está perto de vencer?**
 
-O projeto já possui fundação PWA, domínio/parser determinístico, interface principal de movimentações, OCR local de validade, alertas internos e adapter Firebase/Firestore preparado. Ainda não implementa IA nem login complexo.
+O projeto já possui fundação PWA, domínio/parser determinístico, interface principal de movimentações, OCR local de validade, alertas internos e adapter Firebase/Firestore em produção. Ainda não implementa IA nem login complexo.
 
 ## Stack
 
 - Next.js com App Router
 - React + TypeScript strict
-- Firebase Web SDK com Firestore preparado, sem depender de credenciais reais
+- Firebase Web SDK com Firestore realtime, sem depender de credenciais reais em teste local
 - Iconoir como biblioteca principal de ícones
 - Tesseract.js carregado sob demanda para OCR no navegador
 - CSS moderno com tokens próprios de design
@@ -62,7 +62,7 @@ A UI atual cobre:
 - alertas internos e preferências de aviso;
 - toasts e mensagens amigáveis de erro.
 
-Sem Firebase real, a interface usa o adapter local em `src/features/inventory/app/local-inventory-store.ts`, persistindo dados de desenvolvimento no `localStorage`. Quando as variáveis públicas do Firebase existem, o app usa o repositório Firestore em `src/features/inventory/repositories/firestore-inventory-repository.ts`.
+Sem Firebase real, a interface usa o adapter local em `src/features/inventory/app/local-inventory-store.ts`, persistindo dados de desenvolvimento no `localStorage`. Quando as variáveis públicas do Firebase existem, o app usa o repositório Firestore em `src/features/inventory/repositories/firestore-inventory-repository.ts`, com snapshots em tempo real para refletir alterações feitas em outro celular, tablet ou navegador.
 
 ## Câmera e OCR
 
@@ -117,9 +117,13 @@ Vendeu 3 fardos da Coca 2L
 Saíram 18 unidades de Coca 2L
 Zerou a Coca 2L
 Vendeu tudo da Coca 2 litros
+Chegou 2 fardos de Fanta Guaraná 2 L vence 10/10/2027
+Chegou 1 fardo de Split Zero Lata vence 10/10/2027
 ```
 
-Para adicionar expressão operacional, edite `operationalVocabulary` em `src/features/inventory/parser/vocabulary.ts` e acrescente testes. Para novo alias de produto ou embalagem, persista o alias no banco futuramente e mantenha fixtures/testes locais quando necessário.
+O catálogo inicial reconhece Coca-Cola 2L, Coca-Cola Lata, Coca-Cola Zero Lata, Fanta Guaraná/Uva/Laranja 2L, Fanta Guaraná/Uva/Laranja Lata, Sprite Lata, Sprite Zero Lata, Suco Del Valle Uva/Laranja e Água Mineral 600ml. As conversões ficam por produto: 2L em fardo = 6 unidades, latas de refrigerante em fardo = 12 unidades e água 600ml em fardo/pacote = 12 unidades.
+
+Para adicionar expressão operacional, edite `operationalVocabulary` em `src/features/inventory/parser/vocabulary.ts` e acrescente testes. Para novo alias de produto ou embalagem, atualize o catálogo/base no Firestore quando for dado fixo do negócio e mantenha fixtures/testes locais.
 
 ## Datas
 
@@ -173,7 +177,7 @@ Essas chaves Web do Firebase são públicas por natureza. A proteção real fica
 
 A integração está preparada em `src/lib/firebase`. Sem variáveis públicas, o app continua buildando e usa `localStorage`.
 
-O banco oficial do projeto é Firestore. A estrutura atual usa o workspace simples `inventory/default` e subcoleções:
+O banco oficial do projeto é Firestore. A estrutura atual usa o workspace compartilhado `inventory/shared` e subcoleções:
 
 - `products`
 - `packagingConversions`
@@ -184,12 +188,14 @@ O banco oficial do projeto é Firestore. A estrutura atual usa o workspace simpl
 
 Entrada cria lote e movimento juntos. Saída, zeramento e ajuste usam `runTransaction` para ler o lote, aplicar a regra de domínio e gravar lote + histórico de forma consistente.
 
-As regras ficam em `firestore.rules` e exigem usuário autenticado. O app usa Firebase Auth anônimo para não deixar o banco aberto enquanto evitamos uma tela de login nesta fase. No Console do Firebase, habilite:
+As regras ficam em `firestore.rules` e exigem usuário autenticado anônimo. Todos os dispositivos entram no workspace compartilhado para permitir acompanhamento em tempo real do mesmo estoque. Isso atende ao uso simples em equipe, mas não é controle de acesso forte: se o app precisar restringir usuários específicos, a próxima evolução deve adicionar login real e regras por usuário/equipe.
+
+No Console do Firebase, mantenha habilitado:
 
 - Firestore Database
 - Authentication -> Anonymous
 
-Depois publique regras/índices com Firebase CLI quando estiver logado:
+Publique regras/índices com Firebase CLI quando mudar segurança ou índices:
 
 ```bash
 firebase deploy --only firestore
@@ -235,8 +241,7 @@ Para adicionar novo tipo de embalagem, crie conversão no produto, aliases corre
 
 ## Próximos passos
 
-1. Criar/conectar projeto Firebase real e colar as variáveis públicas no Netlify.
-2. Habilitar Firestore e Authentication Anonymous no Firebase Console.
-3. Publicar `firestore.rules` e `firestore.indexes.json`.
-4. Decidir se o app continuará pessoal/anônimo ou se terá login Google/e-mail para sincronização segura por usuário.
-5. Evoluir push/background se houver backend de notificações.
+1. Validar no uso real se o workspace compartilhado atende à operação da equipe.
+2. Adicionar login real e regras por usuário/equipe se o acesso precisar ser restrito.
+3. Evoluir push/background se houver backend de notificações.
+4. Ampliar catálogo e aliases conforme os produtos reais forem aparecendo.

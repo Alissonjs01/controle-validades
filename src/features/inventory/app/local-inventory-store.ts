@@ -12,7 +12,9 @@ import type {
   IsoDate,
   Lot,
   LotId,
+  PackagingConversion,
   PackagingConversionId,
+  Product,
   ProductId
 } from "@/types/inventory";
 
@@ -322,14 +324,30 @@ function hydrateStoredState(
   return {
     ...initial,
     ...stored,
-    products: stored.products ?? initial.products,
-    packagingConversions:
-      stored.packagingConversions ?? initial.packagingConversions,
+    products: mergeBaselineItems(initial.products, stored.products),
+    packagingConversions: mergeBaselineItems(
+      initial.packagingConversions,
+      stored.packagingConversions
+    ),
     lots: stored.lots ?? initial.lots,
     movements: stored.movements ?? initial.movements,
     alertPreferences: stored.alertPreferences ?? defaultAlertPreferences,
     alertDeliveries: stored.alertDeliveries ?? []
   };
+}
+
+function mergeBaselineItems<T extends Product | PackagingConversion>(
+  baseline: readonly T[],
+  stored: readonly T[] | undefined
+) {
+  if (!stored) {
+    return baseline;
+  }
+
+  const baselineIds = new Set(baseline.map((item) => item.id));
+  const storedExtras = stored.filter((item) => !baselineIds.has(item.id));
+
+  return [...baseline, ...storedExtras];
 }
 
 function createId(prefix: string) {
